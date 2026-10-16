@@ -2,6 +2,11 @@
 
 翻译 agent 的目录骨架。当前没有任何实现代码。
 
+前期范围和迭代方式：
+
+- [路线图](docs/roadmap.md)
+- [迭代方式](docs/workflow.md)
+
 约束：
 
 - agent core 无状态。状态就是 `messages` 以及从它派生的对象。
