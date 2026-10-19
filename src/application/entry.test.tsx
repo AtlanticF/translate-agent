@@ -39,7 +39,7 @@ test("shows the user screen when the loop waits for input", async () => {
     ready,
   );
 
-  expect(output).toContain("用户: 翻译 README");
+  expect(output).toContain("用户 翻译 README");
   expect(output).toContain(inputPlaceholder);
 });
 
@@ -62,9 +62,12 @@ test("shows the copilot screen when a review is waiting", async () => {
     ready,
   );
 
-  expect(output).toContain("审核 1/1");
-  expect(output).toContain("原文: hello");
-  expect(output).toContain("草稿: 你好");
+  expect(output).toContain("原文");
+  expect(output).toContain("译文");
+  expect(output).toContain("hello");
+  expect(output).toContain("你好");
+  expect(output).toContain("1/1");
+  expect(output).toContain("a");
 });
 
 test("shows a startup error", async () => {

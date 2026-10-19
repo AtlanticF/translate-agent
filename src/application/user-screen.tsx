@@ -8,20 +8,13 @@ type UserScreenProps = {
   onSubmit: (text: string) => void;
 };
 
-export const welcome = `我是翻译助手。
+export const appName = "translate-agent";
 
-告诉我要翻译的目录或文件，我会按段落翻译，每一段都等你审核。
-
-工具
-LS         列出目录里的文件
-Read       读取文件的最新内容
-Translate  提交一段译文。你可以选择通过、拒绝或修改
-
-在下面输入目录或文件的绝对路径，回车开始。`;
+export const welcome = "把目录或文件的绝对路径发给我。我会逐段翻译，每一段等你审核。";
 
 export const inputPlaceholder = "输入消息";
 
-// 编辑器或输入框常带空白。去掉首尾空白后如果没有内容，就不提交。
+// 输入框常带空白。去掉首尾空白后如果没有内容，就不提交。
 export function submittedUserText(text: string): string | undefined {
   const trimmed = text.trim();
   return trimmed === "" ? undefined : trimmed;
@@ -30,17 +23,8 @@ export function submittedUserText(text: string): string | undefined {
 export function UserScreen({ messages, onSubmit }: UserScreenProps): ReactElement {
   return (
     <Box flexDirection="column">
-      {messages.length === 0 ? (
-        <Text>{welcome}</Text>
-      ) : (
-        messages.map((message, index) => (
-          <Text key={index}>
-            {roleLabel(message.role)}: {messageText(message)}
-          </Text>
-        ))
-      )}
-      <Box>
-        <Text>{"> "}</Text>
+      {messages.length === 0 ? <Welcome /> : <MessageList messages={messages} />}
+      <Box borderStyle="round" borderColor="cyan" paddingX={1} marginTop={1}>
         <TextInput
           placeholder={inputPlaceholder}
           onSubmit={(value) => {
@@ -51,6 +35,31 @@ export function UserScreen({ messages, onSubmit }: UserScreenProps): ReactElemen
           }}
         />
       </Box>
+    </Box>
+  );
+}
+
+function Welcome(): ReactElement {
+  return (
+    <Box flexDirection="column">
+      <Text>{appName}</Text>
+      <Text dimColor>{welcome}</Text>
+      <Text dimColor>LS         列出目录</Text>
+      <Text dimColor>Read       读取文件</Text>
+      <Text dimColor>Translate  提交一段译文</Text>
+    </Box>
+  );
+}
+
+function MessageList({ messages }: { messages: readonly ModelMessage[] }): ReactElement {
+  return (
+    <Box flexDirection="column">
+      {messages.map((message, index) => (
+        <Text key={index}>
+          <Text dimColor>{roleLabel(message.role)} </Text>
+          {messageText(message)}
+        </Text>
+      ))}
     </Box>
   );
 }
