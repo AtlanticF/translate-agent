@@ -30,15 +30,18 @@ const outputSchema = zodSchema(
   ),
 );
 
-const lsExecutor: ToolExecutor<LsInput, LsEntry[]> = async (input) => {
+export const lsExecutor: ToolExecutor<LsInput> = async (input) => {
   const entries = await readdir(input.path, { withFileTypes: true });
 
-  return entries
-    .map((entry) => ({
-      name: entry.name,
-      type: entry.isDirectory() ? ("directory" as const) : ("file" as const),
-    }))
-    .sort((left, right) => left.name.localeCompare(right.name));
+  return {
+    type: "json",
+    payload: entries
+      .map((entry) => ({
+        name: entry.name,
+        type: entry.isDirectory() ? ("directory" as const) : ("file" as const),
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name)),
+  };
 };
 
 export const lsTool = Object.assign(
@@ -46,7 +49,13 @@ export const lsTool = Object.assign(
     description,
     inputSchema,
     outputSchema,
-    execute: lsExecutor,
+    execute: async (input) => {
+      const result = await lsExecutor(input, { name: "LS", callId: "LS" });
+      if (result.type !== "json" || !Array.isArray(result.payload)) {
+        throw new Error("LS executor returned an unexpected result");
+      }
+      return result.payload as LsEntry[];
+    },
   }),
   { name: "LS" as const },
 );
