@@ -88,3 +88,26 @@ test("returned lists do not change the stored messages", () => {
 
   expect(context.getMessages()).toEqual([{ role: "user", content: "a" }]);
 });
+
+test("returns copilot responses for the requested tool calls", () => {
+  const context = new Context();
+  const approve = {
+    tool: { callId: "call-1" },
+    status: "approve" as const,
+  };
+  const refined = {
+    tool: { callId: "call-1" },
+    status: "refined" as const,
+    refined_translated_string: "您好",
+  };
+  const other = {
+    tool: { callId: "call-2" },
+    status: "reject" as const,
+    reason: "语气不对",
+  };
+
+  context.addCopilotResponses([approve, other, refined]);
+
+  expect(context.getCopilotResponses(["call-1"])).toEqual([approve, refined]);
+  expect(context.getCopilotResponses(["call-2", "missing"])).toEqual([other]);
+});
