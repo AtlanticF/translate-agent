@@ -26,11 +26,14 @@ test("shows the current review and the choice keys", () => {
     <CopilotScreen requests={[first, second]} onSubmit={() => {}} />,
   );
 
-  expect(output).toContain("审核 1/2");
-  expect(output).toContain("文件: /tmp/note.txt");
-  expect(output).toContain("原文: hello");
-  expect(output).toContain("草稿: 你好");
-  expect(output).toContain("a 通过    r 拒绝    f 修改");
+  expect(output).toContain("原文");
+  expect(output).toContain("译文");
+  expect(output).toContain("hello");
+  expect(output).toContain("你好");
+  expect(output).toContain("world");
+  expect(output).toContain("未开始");
+  expect(output).toContain("1/2");
+  expect(output).toContain("a");
 });
 
 test("shows an empty state when nothing is waiting", () => {

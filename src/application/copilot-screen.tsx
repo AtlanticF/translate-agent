@@ -1,10 +1,13 @@
-import { Box, Text, useApp, useInput } from "ink";
+import { Box, Text, useApp, useInput, useWindowSize } from "ink";
 import { useRef, useState, type ReactElement } from "react";
 import type { CopilotResponseEntry } from "../messages/context.js";
 import type { CopilotRequest } from "../prompts/system.memory.js";
 import { editInFile } from "./editor.js";
+import { visibleParagraphs, type Paragraph } from "./paragraphs.js";
+import { SourcePane, TranslationPane } from "./review-panes.js";
 
 type CopilotScreenProps = {
+  done?: readonly Paragraph[];
   requests: readonly CopilotRequest[];
   onSubmit: (responses: CopilotResponseEntry[]) => void;
   edit?: (initial: string) => Promise<string>;
@@ -39,12 +42,15 @@ export function submittedRefinement(text: string): string | undefined {
 }
 
 export function CopilotScreen({
+  done = [],
   requests,
   onSubmit,
   edit,
 }: CopilotScreenProps): ReactElement {
+  const { columns } = useWindowSize();
   const { suspendTerminal } = useApp();
   const [index, setIndex] = useState(0);
+  const [decided, setDecided] = useState<Paragraph[]>([]);
   const [error, setError] = useState<string | undefined>();
   const responses = useRef<CopilotResponseEntry[]>([]);
   const busy = useRef(false);
@@ -71,7 +77,7 @@ export function CopilotScreen({
     }
     const callId = current.tool.callId;
     if (action === "approve") {
-      pushResponse({ status: "approve", tool: { callId } });
+      pushResponse(current, { status: "approve", tool: { callId } });
       return;
     }
 
@@ -85,14 +91,14 @@ export function CopilotScreen({
           if (reason === undefined) {
             return;
           }
-          pushResponse({ status: "reject", reason, tool: { callId } });
+          pushResponse(current, { status: "reject", reason, tool: { callId } });
           return;
         }
         const refined = submittedRefinement(text);
         if (refined === undefined) {
           return;
         }
-        pushResponse({
+        pushResponse(current, {
           status: "refined",
           refined_translated_string: refined,
           tool: { callId },
@@ -110,20 +116,31 @@ export function CopilotScreen({
     return <Text>没有待审核的译文</Text>;
   }
 
+  const paragraphs = visibleParagraphs([...done, ...decided], requests.slice(index));
+  const position = paragraphs.findIndex((item) => item.status === "current") + 1;
+
   return (
     <Box flexDirection="column">
       <Text>
-        审核 {index + 1}/{requests.length}
+        <Text dimColor>{request.file_path} </Text>
+        {position}/{paragraphs.length}
       </Text>
-      <Text>文件: {request.file_path}</Text>
-      <Text>原文: {request.src_string}</Text>
-      <Text>草稿: {request.translate_string}</Text>
-      <Text>a 通过    r 拒绝    f 修改</Text>
-      {error ? <Text>无法打开编辑器: {error}</Text> : null}
+      <Box flexDirection={columns < 80 ? "column" : "row"} gap={1}>
+        <SourcePane paragraphs={paragraphs} />
+        <TranslationPane paragraphs={paragraphs} />
+      </Box>
+      <Text>
+        <Text color="cyan">a</Text> 通过    <Text color="cyan">r</Text> 拒绝    <Text color="cyan">f</Text> 修改
+      </Text>
+      {error ? <Text color="red">无法打开编辑器: {error}</Text> : null}
     </Box>
   );
 
-  function pushResponse(response: CopilotResponseEntry): void {
+  function pushResponse(currentRequest: CopilotRequest, response: CopilotResponseEntry): void {
+    const paragraph = finishedParagraph(currentRequest, response);
+    if (paragraph) {
+      setDecided((items) => [...items, paragraph]);
+    }
     responses.current.push(response);
     if (responses.current.length === requests.length) {
       finished.current = true;
@@ -132,4 +149,20 @@ export function CopilotScreen({
     }
     setIndex(responses.current.length);
   }
+}
+
+function finishedParagraph(
+  request: CopilotRequest,
+  response: CopilotResponseEntry,
+): Paragraph | undefined {
+  if (response.status === "reject") {
+    return undefined;
+  }
+  return {
+    id: request.tool.callId,
+    src: request.src_string,
+    translation:
+      response.status === "refined" ? response.refined_translated_string : request.translate_string,
+    status: "done",
+  };
 }
