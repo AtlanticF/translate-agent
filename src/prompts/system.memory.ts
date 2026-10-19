@@ -20,35 +20,72 @@ export function SYSTEM_MEMORY({
   res: CopilotResponse;
   currentMemory: string;
 }): string {
-  return `你维护一份翻译 memory。memory 是对象列表，每一项有 index、text、tags。
-根据一次已经审核过的翻译，决定对 memory 做哪些操作。
-只返回 JSON，不要返回其他文字：
-{"ops":[{"action":"add"|"update"|"delete","index":0,"text":"","tags":[]}]}
+  return `
+You are a memory engine that extracts durable user preferences from the current feedback
+and updates the memory base in one pass (extract → decide → upsert).
 
-操作含义：
-- add：新增一条。index 由调用方按当前列表长度填写，这里给出的 index 可以忽略。
-- update：按 index 替换 text 和 tags。
-- delete：按 index 删除。
-没有需要变更的内容时，返回 {"ops":[]}。
+Input
+<feedback>
+${formatFeedback(req, res)}
+</feedback>
 
-当前 memory：
+<previous_profile>
 ${currentMemory}
+</previous_profile>
 
-待审核的翻译请求：
-- file_id: ${req.file_id}
-- src_string: ${req.src_string}
-- translate_string: ${req.translate_string}
+Rules
+- Extract only durable, reusable preferences (terminology mapping, style/tone rules, stable choices).
+- Ignore temporary or one-off details.
+- For each memory item, write the text as a full instruction sentence that already includes when this rule applies, and give a short inline example.
+- Keep the text concise but self-contained. Stay within 200 characters.
+- Tags must use this fixed set: ["terminology","style","preference"].
 
-${formatReview(res)}`;
+Output
+Return strict JSON:
+{
+  "ops": [
+    {
+      "action": "add",
+      "index": -1,
+      "text": "Use a formal address in user-facing copy. Example: prefer 您 over 你.",
+      "tags": ["style"]
+    }
+  ]
 }
 
-function formatReview(res: CopilotResponse): string {
-  switch (res.status) {
-    case "approve":
-      return "用户审核结果：approve。用户接受了 translate_string。";
-    case "reject":
-      return `用户审核结果：reject。用户拒绝了 translate_string。原因：${res.reason}`;
-    case "refined":
-      return `用户审核结果：refined。用户把译文修正为：${res.refined_translated_string}`;
+Rules for actions
+- "add": for a new stable preference that is not in the current memory. Set index to -1.
+- "update": when an existing memory needs refinement or correction. Set index to that item's index.
+- "delete": when an existing memory is invalid or contradicted. Set index to that item's index.
+- When nothing should change, return {"ops":[]}.
+
+Return strict JSON only, no commentary.
+`;
+}
+
+function formatFeedback(req: CopilotRequest, res: CopilotResponse): string {
+  const lines = [
+    `Status: ${res.status}`,
+    `FileID: ${req.file_id}`,
+    `Source: ${req.src_string}`,
+    `Translation: ${req.translate_string}`,
+  ];
+
+  if (res.status === "reject") {
+    lines.push(`User rejected the translation. Reason: ${res.reason}`);
   }
+
+  if (res.status === "refined") {
+    lines.push(
+      "User corrected the translation.",
+      "<from>",
+      req.translate_string,
+      "</from>",
+      "<to>",
+      res.refined_translated_string,
+      "</to>",
+    );
+  }
+
+  return lines.join("\n");
 }
