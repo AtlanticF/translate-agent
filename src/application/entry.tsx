@@ -8,6 +8,7 @@ import type { CopilotRequest } from "../prompts/system.memory.js";
 import { activityItems, waitingLabel, type ActivityItem } from "./activity.js";
 import { ActivityScreen } from "./activity-screen.js";
 import { CopilotScreen } from "./copilot-screen.js";
+import { rememberReview, type Paragraph } from "./paragraphs.js";
 import { runUntilPause, type Pause } from "./pause.js";
 import { createSession } from "./session.js";
 import { UserScreen } from "./user-screen.js";
@@ -59,6 +60,7 @@ export function App({ start = createSession }: AppProps): ReactElement {
   });
   const alive = useRef(true);
   const sessionRef = useRef<AppSession | undefined>(undefined);
+  const [done, setDone] = useState<Paragraph[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -108,8 +110,10 @@ export function App({ start = createSession }: AppProps): ReactElement {
   }
   return (
     <CopilotScreen
+      done={done}
       requests={screen.requests}
       onSubmit={(responses) => {
+        setDone((items) => rememberReview(items, screen.requests, responses));
         void continueWith(submitCopilotReview, responses);
       }}
     />

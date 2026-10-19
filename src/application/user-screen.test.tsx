@@ -1,13 +1,17 @@
 import { renderToString } from "ink";
 import { expect, test } from "vitest";
-import { inputPlaceholder, submittedUserText, UserScreen, welcome } from "./user-screen.js";
+import { appName, inputPlaceholder, submittedUserText, UserScreen, welcome } from "./user-screen.js";
 
-test("shows a welcome and an input when the conversation is empty", () => {
+test("shows a welcome and a bordered input when the conversation is empty", () => {
   const output = renderToString(<UserScreen messages={[]} onSubmit={() => {}} />);
 
+  expect(output).toContain(appName);
   expect(output).toContain(welcome);
+  expect(output).toContain("LS         列出目录");
+  expect(output).toContain("Read       读取文件");
+  expect(output).toContain("Translate  提交一段译文");
   expect(output).toContain(inputPlaceholder);
-  expect(output).not.toContain("Enter 编写下一条");
+  expect(output).toContain("╭");
 });
 
 test("shows messages and the input", () => {
@@ -31,8 +35,8 @@ test("shows messages and the input", () => {
     />,
   );
 
-  expect(output).toContain("用户: translate README");
-  expect(output).toContain("助手: Translate");
+  expect(output).toContain("用户 translate README");
+  expect(output).toContain("助手 Translate");
   expect(output).toContain(inputPlaceholder);
   expect(output).not.toContain(welcome);
 });
