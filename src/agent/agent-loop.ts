@@ -9,10 +9,15 @@ import {
   type UserModelMessage,
 } from "ai";
 import { models } from "../ai/llm.js";
+import type { MemorySource } from "../memory/memory.js";
 import type { Context, CopilotResponseEntry } from "../messages/context.js";
 import type { CopilotRequest, CopilotResponse } from "../prompts/system.memory.js";
 import { SYSTEM_WORKFLOW } from "../prompts/system.workflow.js";
 import type { ToolExecutor } from "../tools/executor.js";
+
+export type AgentLoopOptions = {
+  memory?: MemorySource;
+};
 
 export type NextActor = "user" | "agent";
 
@@ -35,25 +40,24 @@ type ToolExecution =
   | { type: "tool-result-part"; payload: ToolResultPart }
   | { type: "copilot-request"; payload: CopilotRequest };
 
-// 无状态的一步循环。应用通过 userInput 推进，消息和协同结果都放在 context。
+// 无状态的一步循环。应用调用 next() 推进，消息和协同结果都放在 context。
 export class AgentLoop {
   constructor(
     private readonly toolsDef: ToolSet,
     private readonly toolsExecutor: Record<string, ToolExecutor>,
     private readonly context: Context,
-    private readonly options: Record<string, unknown> = {},
+    private readonly options: AgentLoopOptions = {},
   ) {}
 
-  async userInput(messages: UserModelMessage[]): Promise<AgentLoopNext> {
+  async userInput(messages: UserModelMessage[]): Promise<void> {
     this.context.addMessages(messages);
-    return this.next();
   }
 
   async getMessages(): Promise<ModelMessage[]> {
     return [...this.context.getMessages()];
   }
 
-  private async next(): Promise<AgentLoopNext> {
+  async next(): Promise<AgentLoopNext> {
     const step = await this.resolveStep();
     // 先写入新消息，再统计未执行的 tool，返回值才能反映这一步之后的状态。
     this.context.addMessages(step.messages);
@@ -109,7 +113,9 @@ export class AgentLoop {
   private async askModel(): Promise<NextStep> {
     const result = await generateText({
       model: models.translator,
-      system: SYSTEM_WORKFLOW({ currentMemory: "" }),
+      system: SYSTEM_WORKFLOW({
+        currentMemory: this.options.memory?.provideMemory() ?? "",
+      }),
       // 去掉 execute，避免 SDK 自己跑工具；协同请求要由这里拦截。
       tools: toolsWithoutExecute(this.toolsDef),
       messages: this.context.toModelMessages(),

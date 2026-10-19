@@ -1,4 +1,5 @@
 import type { JSONValue } from "ai";
+import type { MemorySource } from "../memory/memory.js";
 import type {
   CopilotRequest,
   CopilotResponse,
@@ -7,6 +8,7 @@ import type {
 export type ToolExecutorOptions = {
   name: string;
   callId: string;
+  memory?: MemorySource;
 };
 
 export type ToolExecutorResult =

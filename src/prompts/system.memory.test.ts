@@ -4,7 +4,8 @@ import { SYSTEM_MEMORY, type CopilotRequest } from "./system.memory.js";
 const request: CopilotRequest = {
   src_string: "hello",
   translate_string: "你好",
-  file_id: "file-1",
+  file_path: "/tmp/file-1",
+  tool: { name: "Translate", callId: "call-1" },
 };
 
 const currentMemory = '[{"index":0,"text":"keep","tags":["tone"]}]';
@@ -18,7 +19,7 @@ test("includes the source, translation, and current memory when the user approve
 
   expect(prompt).toContain("You are a memory engine");
   expect(prompt).toContain("Status: approve");
-  expect(prompt).toContain("FileID: file-1");
+  expect(prompt).toContain("File: /tmp/file-1");
   expect(prompt).toContain("Source: hello");
   expect(prompt).toContain("Translation: 你好");
   expect(prompt).toContain(currentMemory);
