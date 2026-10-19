@@ -1,4 +1,6 @@
 import { readdir } from "node:fs/promises";
+import { tool, zodSchema } from "ai";
+import { z } from "zod";
 import type { ToolExecutor } from "./executor.js";
 
 export type LsInput = {
@@ -10,7 +12,25 @@ export type LsEntry = {
   type: "file" | "directory";
 };
 
-export const lsTool: ToolExecutor<LsInput, LsEntry[]> = async (input) => {
+const description =
+  "List the files and subdirectories in one directory. Use this to find files to translate. path must be an existing directory.";
+
+const inputSchema = zodSchema(
+  z.object({
+    path: z.string().describe("Directory to list."),
+  }),
+);
+
+const outputSchema = zodSchema(
+  z.array(
+    z.object({
+      name: z.string(),
+      type: z.enum(["file", "directory"]),
+    }),
+  ),
+);
+
+const lsExecutor: ToolExecutor<LsInput, LsEntry[]> = async (input) => {
   const entries = await readdir(input.path, { withFileTypes: true });
 
   return entries
@@ -20,3 +40,13 @@ export const lsTool: ToolExecutor<LsInput, LsEntry[]> = async (input) => {
     }))
     .sort((left, right) => left.name.localeCompare(right.name));
 };
+
+export const lsTool = Object.assign(
+  tool({
+    description,
+    inputSchema,
+    outputSchema,
+    execute: lsExecutor,
+  }),
+  { name: "LS" as const },
+);

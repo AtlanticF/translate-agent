@@ -9,7 +9,12 @@ test("lists files and directories in the given path", async () => {
   await writeFile(join(directory, "b.txt"), "b");
   await mkdir(join(directory, "a-dir"));
 
-  await expect(lsTool({ path: directory })).resolves.toEqual([
+  await expect(
+    lsTool.execute(
+      { path: directory },
+      { toolCallId: "call-1", messages: [], context: {} },
+    ),
+  ).resolves.toEqual([
     { name: "a-dir", type: "directory" },
     { name: "b.txt", type: "file" },
   ]);
@@ -20,5 +25,19 @@ test("rejects a path that is not a directory", async () => {
   const filePath = join(directory, "note.txt");
   await writeFile(filePath, "note");
 
-  await expect(lsTool({ path: filePath })).rejects.toThrow();
+  await expect(
+    lsTool.execute(
+      { path: filePath },
+      { toolCallId: "call-1", messages: [], context: {} },
+    ),
+  ).rejects.toThrow();
+});
+
+test("is the LS tool", () => {
+  expect(lsTool).toMatchObject({
+    name: "LS",
+    description: expect.any(String),
+    inputSchema: expect.anything(),
+    outputSchema: expect.anything(),
+  });
 });
