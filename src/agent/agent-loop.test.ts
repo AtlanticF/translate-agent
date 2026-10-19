@@ -30,7 +30,7 @@ test("asks the user when the context is empty", async () => {
   const context = new Context();
   const loop = new AgentLoop({}, {}, context);
 
-  const result = await loop.userInput([]);
+  const result = await loop.next();
 
   expect(result).toEqual({
     nextActor: "user",
@@ -58,7 +58,11 @@ test("stores user messages and returns the model reply", async () => {
   const loop = new AgentLoop({}, {}, context);
   const user = { role: "user" as const, content: "translate README" };
 
-  const result = await loop.userInput([user]);
+  await loop.userInput([user]);
+  expect(generateTextMock).not.toHaveBeenCalled();
+  await expect(loop.getMessages()).resolves.toEqual([user]);
+
+  const result = await loop.next();
 
   expect(result.nextActor).toBe("user");
   expect(result.finishReason).toBe("stop");
@@ -77,6 +81,30 @@ test("stores user messages and returns the model reply", async () => {
   );
 });
 
+test("sends saved preferences to the translator", async () => {
+  generateTextMock.mockResolvedValue({
+    toolCalls: [],
+    finishReason: "stop",
+    finalStep: {
+      response: { messages: [{ role: "assistant", content: "done" }] },
+    },
+  } as unknown as Awaited<ReturnType<typeof generateText>>);
+  const loop = new AgentLoop({}, {}, new Context([{ role: "user", content: "go" }]), {
+    memory: {
+      provideMemory: () => "Use 您. (style)",
+      extractMemory: vi.fn(),
+    },
+  });
+
+  await loop.next();
+
+  expect(generateTextMock).toHaveBeenCalledWith(
+    expect.objectContaining({
+      system: expect.stringContaining("Use 您. (style)"),
+    }),
+  );
+});
+
 test("returns the user when the model response has no messages", async () => {
   generateTextMock.mockResolvedValue({
     toolCalls: [{ toolCallId: "call-1", toolName: "LS", input: { path: "." } }],
@@ -85,7 +113,7 @@ test("returns the user when the model response has no messages", async () => {
   } as unknown as Awaited<ReturnType<typeof generateText>>);
 
   const loop = new AgentLoop({}, {}, new Context([{ role: "user", content: "go" }]));
-  const result = await loop.userInput([]);
+  const result = await loop.next();
 
   expect(result.nextActor).toBe("user");
   expect(result.finishReason).toBe("length");
@@ -121,7 +149,7 @@ test("rewrites tool call ids and leaves the next step with the agent", async () 
     new Context([{ role: "user", content: "list files" }]),
   );
 
-  const result = await loop.userInput([]);
+  const result = await loop.next();
   const call = result.unprocessedToolCalls[0];
 
   expect(result.nextActor).toBe("agent");
@@ -164,7 +192,7 @@ test("runs a pending tool and records the result", async () => {
   ]);
   const loop = new AgentLoop({}, { LS: executor }, context);
 
-  const result = await loop.userInput([]);
+  const result = await loop.next();
 
   expect(executor).toHaveBeenCalledWith(
     { path: "/tmp" },
@@ -218,7 +246,7 @@ test("passes the stored copilot response into the pending tool", async () => {
   context.addCopilotResponses([response]);
   const loop = new AgentLoop({}, { Translate: executor }, context);
 
-  await loop.userInput([]);
+  await loop.next();
 
   expect(executor).toHaveBeenCalledWith(
     { text: "hello" },
@@ -231,7 +259,8 @@ test("keeps the agent when a tool asks for review", async () => {
   const request: CopilotRequest = {
     src_string: "hello",
     translate_string: "你好",
-    file_id: "readme",
+    file_path: "/tmp/readme",
+    tool: { name: "Translate", callId: "call-1" },
   };
   const executor = vi.fn<ToolExecutor>(async () => ({
     type: "copilot-request",
@@ -249,7 +278,7 @@ test("keeps the agent when a tool asks for review", async () => {
     new Context([{ role: "assistant", content: [call] }]),
   );
 
-  const result = await loop.userInput([]);
+  const result = await loop.next();
 
   expect(result.nextActor).toBe("agent");
   expect(result.copilotRequests).toEqual([request]);
@@ -279,7 +308,7 @@ test("turns a tool failure into an error result", async () => {
     ]),
   );
 
-  const result = await loop.userInput([]);
+  const result = await loop.next();
 
   expect(result.messages).toEqual([
     {
@@ -316,7 +345,7 @@ test("rejects a tool call that has no executor", async () => {
     ]),
   );
 
-  await expect(loop.userInput([])).rejects.toThrow(
+  await expect(loop.next()).rejects.toThrow(
     "Tool executor not found for: LS",
   );
 });
@@ -359,7 +388,7 @@ test("ignores a tool call that already has a result", async () => {
     ]),
   );
 
-  const result = await loop.userInput([]);
+  const result = await loop.next();
 
   expect(executor).not.toHaveBeenCalled();
   expect(result.nextActor).toBe("user");

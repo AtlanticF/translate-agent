@@ -3,7 +3,11 @@ export type CopilotStatus = "approve" | "reject" | "refined";
 export type CopilotRequest = {
   src_string: string;
   translate_string: string;
-  file_id: string;
+  file_path: string;
+  tool: {
+    name: string;
+    callId: string;
+  };
 };
 
 export type CopilotResponse =
@@ -66,7 +70,7 @@ Return strict JSON only, no commentary.
 function formatFeedback(req: CopilotRequest, res: CopilotResponse): string {
   const lines = [
     `Status: ${res.status}`,
-    `FileID: ${req.file_id}`,
+    `File: ${req.file_path}`,
     `Source: ${req.src_string}`,
     `Translation: ${req.translate_string}`,
   ];
