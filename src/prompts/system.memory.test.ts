@@ -23,9 +23,9 @@ test("includes the source, translation, and current memory when the user approve
   expect(prompt).toContain("Source: hello");
   expect(prompt).toContain("Translation: 你好");
   expect(prompt).toContain(currentMemory);
-  expect(prompt).toContain('"index": -1');
+  expect(prompt).toContain('"index": number');
+  expect(prompt).toContain("or -1 for new items");
   expect(prompt).toContain("Return strict JSON only, no commentary.");
-  expect(prompt).not.toContain("//");
 });
 
 test("includes the source, translation, and reject reason", () => {
