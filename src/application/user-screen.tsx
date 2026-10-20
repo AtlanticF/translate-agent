@@ -10,6 +10,12 @@ type UserScreenProps = {
 
 export const appName = "translate-agent";
 
+// 用方块字符拼标志，终端里不需要图片。
+export const logo = ` ▝▜▙ 
+▗▟▀▀▘
+ ▝▜▙ 
+▗▟▀▀▘`;
+
 export const welcome = "把目录或文件的绝对路径发给我。我会逐段翻译，每一段等你审核。";
 
 export const inputPlaceholder = "输入消息";
@@ -42,11 +48,16 @@ export function UserScreen({ messages, onSubmit }: UserScreenProps): ReactElemen
 function Welcome(): ReactElement {
   return (
     <Box flexDirection="column">
-      <Text>{appName}</Text>
-      <Text dimColor>{welcome}</Text>
-      <Text dimColor>LS         列出目录</Text>
-      <Text dimColor>Read       读取文件</Text>
-      <Text dimColor>Translate  提交一段译文</Text>
+      <Box>
+        <Text color="white">{logo}</Text>
+        <Box marginLeft={2}>
+          <Text color="white">{appName}</Text>
+        </Box>
+      </Box>
+      <Text color="white">{welcome}</Text>
+      <Text color="white">LS         列出目录</Text>
+      <Text color="white">Read       读取文件</Text>
+      <Text color="white">Translate  提交一段译文</Text>
     </Box>
   );
 }
