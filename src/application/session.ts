@@ -30,11 +30,11 @@ export async function createSession(): Promise<{ loop: AgentLoop; context: Conte
 }
 
 async function writeTranslation({
-  translated_string,
+  contents,
   file_path,
 }: {
-  translated_string: string;
+  contents: string;
   file_path: string;
 }): Promise<void> {
-  await writeFile(file_path, translated_string);
+  await writeFile(file_path, contents);
 }

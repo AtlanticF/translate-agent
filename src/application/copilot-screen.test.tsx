@@ -4,6 +4,7 @@ import type { CopilotRequest } from "../prompts/system.memory.js";
 import {
   copilotKey,
   CopilotScreen,
+  reviewProgress,
   submittedReason,
   submittedRefinement,
 } from "./copilot-screen.js";
@@ -26,14 +27,18 @@ test("shows the current review and the choice keys", () => {
     <CopilotScreen requests={[first, second]} onSubmit={() => {}} />,
   );
 
-  expect(output).toContain("原文");
-  expect(output).toContain("译文");
   expect(output).toContain("hello");
   expect(output).toContain("你好");
-  expect(output).toContain("world");
-  expect(output).toContain("未开始");
-  expect(output).toContain("1/2");
-  expect(output).toContain("a");
+  expect(output).not.toContain("world");
+  expect(output).not.toContain("原文");
+  expect(output).not.toContain("译文");
+  expect(output).not.toContain("已完成");
+  expect(output).not.toContain("当前");
+  expect(output).toContain("通过");
+  expect(output).toContain("拒绝");
+  expect(output).toContain("修改");
+  expect(output).toContain("0%");
+  expect(output).toContain("剩余 2");
 });
 
 test("shows an empty state when nothing is waiting", () => {
@@ -51,4 +56,5 @@ test("maps review keys and ignores a blank reason", () => {
   expect(submittedReason(" 太直译 \n")).toBe("太直译");
   expect(submittedRefinement(" \n")).toBeUndefined();
   expect(submittedRefinement("您好\n")).toBe("您好\n");
+  expect(reviewProgress(1, 3, 1)).toEqual({ percent: 50, remaining: 2 });
 });

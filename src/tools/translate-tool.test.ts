@@ -13,8 +13,11 @@ const input = {
 };
 const options = { name: "Translate", callId: "call-1" };
 
-function executor(writer: TranslateWriter = vi.fn(async () => {})) {
-  return { writer, run: createTranslateExecutor({ writer }) };
+function executor(
+  writer: TranslateWriter = vi.fn(async () => {}),
+  read: (filePath: string) => Promise<string> = async () => "hello",
+) {
+  return { writer, run: createTranslateExecutor({ writer, read }) };
 }
 
 test("is the Translate tool", () => {
@@ -77,7 +80,7 @@ test("writes the draft when the review is approved", async () => {
     },
   });
   expect(writer).toHaveBeenCalledWith({
-    translated_string: "你好",
+    contents: "你好",
     file_path: filePath,
   });
 });
@@ -99,7 +102,7 @@ test("writes the corrected string when the review is refined", async () => {
     },
   });
   expect(writer).toHaveBeenCalledWith({
-    translated_string: "您好",
+    contents: "您好",
     file_path: filePath,
   });
 });
@@ -120,6 +123,41 @@ test("does not write when the review is rejected", async () => {
   expect(writer).not.toHaveBeenCalled();
 });
 
+test("replaces only the unique source string", async () => {
+  const { run, writer } = executor(vi.fn(async () => {}), async () => "before hello after");
+
+  await run(input, options, { status: "approve" });
+
+  expect(writer).toHaveBeenCalledWith({
+    contents: "before 你好 after",
+    file_path: filePath,
+  });
+});
+
+test("rejects a source string that is missing or not unique", async () => {
+  const missing = executor(vi.fn(async () => {}), async () => "goodbye");
+  const repeated = executor(vi.fn(async () => {}), async () => "hello hello");
+
+  await expect(missing.run(input, options)).resolves.toEqual({
+    type: "json",
+    payload: {
+      translated_string: "",
+      status: "reject",
+      reason: "src_string was not found in the file",
+    },
+  });
+  await expect(repeated.run(input, options)).resolves.toEqual({
+    type: "json",
+    payload: {
+      translated_string: "",
+      status: "reject",
+      reason: "src_string is not unique in the file",
+    },
+  });
+  expect(missing.writer).not.toHaveBeenCalled();
+  expect(repeated.writer).not.toHaveBeenCalled();
+});
+
 test("extracts memory before writing a refined translation", async () => {
   const order: string[] = [];
   const memory = {
@@ -131,7 +169,7 @@ test("extracts memory before writing a refined translation", async () => {
   const writer = vi.fn(async () => {
     order.push("writer");
   });
-  const run = createTranslateExecutor({ writer });
+  const run = createTranslateExecutor({ writer, read: async () => "hello" });
 
   await run(
     input,

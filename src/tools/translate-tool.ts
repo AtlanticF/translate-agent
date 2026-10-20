@@ -1,8 +1,9 @@
+import { readFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { tool, zodSchema } from "ai";
 import { z } from "zod";
 import type { CopilotResponse } from "../prompts/system.memory.js";
-import type { ToolExecutor } from "./executor.js";
+import type { ToolExecutor, ToolExecutorResult } from "./executor.js";
 
 export type TranslateInput = {
   file_path: string;
@@ -17,9 +18,11 @@ export type TranslateOutput = {
 };
 
 export type TranslateWriter = (params: {
-  translated_string: string;
+  contents: string;
   file_path: string;
 }) => Promise<void>;
+
+export type TranslateReader = (filePath: string) => Promise<string>;
 
 const maxSourceLength = 300;
 
@@ -27,7 +30,9 @@ const description = `Create translation units for documents to be translated. Ac
 
 - Before translating a specific file, ensure the 'Read' tool has been used in the current context to read that same absolute file_path, so you have the latest file contents.
 - file_path must be an absolute path, not a relative path.
+- The tool replaces that unique src_string in the file. The rest of the file stays as it is.
 - The 'src_string' must be unique in the original text; if it's not unique the translation will fail. You can ensure uniqueness by expanding the 'src_string' range.
+- Do not include the Read tool's line number in src_string. line is not part of the file text.
 - 'src_string' should contain only the current unit's content and must not include content from previously translated units. Keep it within 300 characters.
 - 'translate_string' is the draft translation of 'src_string' but should be as accurate as possible to reduce later manual proofreading.
 - The returned 'translated_string' is the final translation after human review. 'status' indicates the human review state and can be 'approve', 'reject', or 'refined' (user manually adjusted).
@@ -74,8 +79,10 @@ export const translateTool = Object.assign(
 
 export function createTranslateExecutor({
   writer,
+  read = readTranslation,
 }: {
   writer: TranslateWriter;
+  read?: TranslateReader;
 }): ToolExecutor<TranslateInput> {
   return async (input, options, copilotResponse) => {
     if (!isAbsolute(input.file_path)) {
@@ -83,14 +90,13 @@ export function createTranslateExecutor({
     }
 
     if (input.src_string.length > maxSourceLength) {
-      return {
-        type: "json",
-        payload: {
-          translated_string: "",
-          status: "reject",
-          reason: "Source string exceeds maximum length of 300 characters",
-        },
-      };
+      return reject("Source string exceeds maximum length of 300 characters");
+    }
+
+    const text = await read(input.file_path);
+    const found = findUnique(text, input.src_string);
+    if ("reason" in found) {
+      return reject(found.reason);
     }
 
     if (!copilotResponse) {
@@ -122,7 +128,7 @@ export function createTranslateExecutor({
     }
     if (output.status === "approve" || output.status === "refined") {
       await writer({
-        translated_string: output.translated_string,
+        contents: replaceAt(text, found.start, input.src_string.length, output.translated_string),
         file_path: input.file_path,
       });
     }
@@ -132,6 +138,56 @@ export function createTranslateExecutor({
       payload: output,
     };
   };
+}
+
+function reject(reason: string): ToolExecutorResult {
+  return {
+    type: "json",
+    payload: {
+      translated_string: "",
+      status: "reject",
+      reason,
+    },
+  };
+}
+
+function findUnique(text: string, src: string): { start: number } | { reason: string } {
+  if (src.length === 0) {
+    return { reason: "src_string is empty" };
+  }
+
+  const start = text.indexOf(src);
+  if (start < 0) {
+    return { reason: "src_string was not found in the file" };
+  }
+  if (text.indexOf(src, start + src.length) !== -1) {
+    return { reason: "src_string is not unique in the file" };
+  }
+  return { start };
+}
+
+function replaceAt(text: string, start: number, length: number, translated: string): string {
+  return text.slice(0, start) + translated + text.slice(start + length);
+}
+
+async function readTranslation(filePath: string): Promise<string> {
+  try {
+    return await readFile(filePath, "utf8");
+  } catch (error) {
+    if (isEnoent(error)) {
+      throw new Error(`File not found: ${filePath}`);
+    }
+    throw error;
+  }
+}
+
+function isEnoent(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "ENOENT"
+  );
 }
 
 function reviewedTranslation(

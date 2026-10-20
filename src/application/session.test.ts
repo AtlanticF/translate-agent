@@ -16,7 +16,7 @@ test("shares one context with the loop", async () => {
 test("writes an approved translation to its file", async () => {
   const directory = await mkdtemp(join(tmpdir(), "session-"));
   const filePath = join(directory, "note.txt");
-  await writeFile(filePath, "hello");
+  await writeFile(filePath, "before hello after");
   const { loop, context } = await createSession();
 
   context.addMessages([
@@ -41,5 +41,5 @@ test("writes an approved translation to its file", async () => {
   const result = await loop.next();
 
   expect(result.copilotRequests).toEqual([]);
-  await expect(readFile(filePath, "utf8")).resolves.toBe("你好");
+  await expect(readFile(filePath, "utf8")).resolves.toBe("before 你好 after");
 });

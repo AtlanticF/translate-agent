@@ -1,20 +1,21 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+import { readAppEnv } from "../env.js";
 
 export const openRouterModelIds = {
-  translator: "z-ai/glm-4.5",
-  memory: "google/gemini-2.5-flash",
-} as const;
+  get translator() {
+    return readAppEnv().translatorModel;
+  },
+  get memory() {
+    return readAppEnv().memoryModel;
+  },
+};
 
-const openRouterBaseURL = "https://openrouter.ai/api/v1";
+export const openRouterBaseURL = "https://openrouter.ai/api/v1";
 
 export function readOpenRouterApiKey(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  const apiKey = env.OPENROUTER_API_KEY;
-  if (!apiKey) {
-    throw new Error("OPENROUTER_API_KEY is required");
-  }
-  return apiKey;
+  return readAppEnv(env).apiKey;
 }
 
 function openrouter(apiKey: string) {
@@ -27,9 +28,11 @@ function openrouter(apiKey: string) {
 
 export const models = {
   get translator() {
-    return openrouter(readOpenRouterApiKey())(openRouterModelIds.translator);
+    const config = readAppEnv();
+    return openrouter(config.apiKey)(config.translatorModel);
   },
   get memory() {
-    return openrouter(readOpenRouterApiKey())(openRouterModelIds.memory);
+    const config = readAppEnv();
+    return openrouter(config.apiKey)(config.memoryModel);
   },
 };

@@ -1,10 +1,12 @@
 import { readdir } from "node:fs/promises";
+import { isAbsolute, matchesGlob } from "node:path";
 import { tool, zodSchema } from "ai";
 import { z } from "zod";
 import type { ToolExecutor } from "./executor.js";
 
 export type LsInput = {
   path: string;
+  ignore?: string[];
 };
 
 export type LsEntry = {
@@ -12,12 +14,16 @@ export type LsEntry = {
   type: "file" | "directory";
 };
 
-const description =
-  "List the files and subdirectories in one directory. Use this to find files to translate. path must be an existing directory.";
+const description = `Lists files and directories in a given path. The path parameter must be an absolute path, not a relative path. You can optionally provide an array of glob patterns to ignore with the ignore parameter. If you already know the file path, use the Read tool instead of listing the directory.`;
 
 const inputSchema = zodSchema(
-  z.object({
-    path: z.string().describe("Directory to list."),
+  z.strictObject({
+    path: z
+      .string()
+      .describe(
+        "The absolute path to the directory to list (must be absolute, not relative)",
+      ),
+    ignore: z.array(z.string()).optional().describe("List of glob patterns to ignore"),
   }),
 );
 
@@ -31,11 +37,17 @@ const outputSchema = zodSchema(
 );
 
 export const lsExecutor: ToolExecutor<LsInput> = async (input) => {
+  if (!isAbsolute(input.path)) {
+    throw new Error("path must be an absolute path");
+  }
+
   const entries = await readdir(input.path, { withFileTypes: true });
+  const ignore = input.ignore ?? [];
 
   return {
     type: "json",
     payload: entries
+      .filter((entry) => !isIgnored(entry.name, ignore))
       .map((entry) => ({
         name: entry.name,
         type: entry.isDirectory() ? ("directory" as const) : ("file" as const),
@@ -59,3 +71,9 @@ export const lsTool = Object.assign(
   }),
   { name: "LS" as const },
 );
+
+function isIgnored(name: string, patterns: readonly string[]): boolean {
+  return patterns.some(
+    (pattern) => matchesGlob(name, pattern) || matchesGlob(`${name}/**`, pattern),
+  );
+}

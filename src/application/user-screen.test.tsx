@@ -1,25 +1,28 @@
 import { renderToString } from "ink";
 import { expect, test } from "vitest";
 import {
-  appName,
+  exampleHeading,
+  examplePrompts,
   inputPlaceholder,
-  logo,
   submittedUserText,
   UserScreen,
-  welcome,
+  welcomeDescription,
+  welcomeHint,
+  welcomeTitle,
 } from "./user-screen.js";
 
 test("shows a welcome and a bordered input when the conversation is empty", () => {
   const output = renderToString(<UserScreen messages={[]} onSubmit={() => {}} />);
 
-  for (const line of logo.split("\n")) {
+  expect(output).toContain(welcomeTitle);
+  expect(output).not.toContain("▝▜▙");
+  for (const line of welcomeDescription) {
     expect(output).toContain(line);
   }
-  expect(output).toContain(appName);
-  expect(output).toContain(welcome);
-  expect(output).toContain("LS         列出目录");
-  expect(output).toContain("Read       读取文件");
-  expect(output).toContain("Translate  提交一段译文");
+  expect(output).toContain(exampleHeading);
+  expect(output).toContain(`1. "${examplePrompts[0]}"`);
+  expect(output).toContain(`2. "${examplePrompts[1]}"`);
+  expect(output).toContain(welcomeHint);
   expect(output).toContain(inputPlaceholder);
   expect(output).toContain("╭");
 });
@@ -45,10 +48,11 @@ test("shows messages and the input", () => {
     />,
   );
 
-  expect(output).toContain("用户 translate README");
-  expect(output).toContain("助手 Translate");
+  expect(output).toContain("user:");
+  expect(output).toContain("translate README");
+  expect(output).not.toContain("assistant:");
   expect(output).toContain(inputPlaceholder);
-  expect(output).not.toContain(welcome);
+  expect(output).not.toContain(welcomeTitle);
 });
 
 test("drops a blank user message", () => {
