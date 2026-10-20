@@ -100,10 +100,6 @@ export class Memory implements MemorySource {
           },
         },
       });
-      await appendFile("/tmp/translator-agent.log", `[memory] Current memory: ${JSON.stringify(this.current)}\n`);
-      // write log into file: /tmp/translator-agent.log
-      await appendFile("/tmp/translator-agent.log", `[memory] LLM response: ${result.text}\n`);
-      // console.info("[memory] LLM response:", result.text);
       this.applyOps(parseMemoryOps(result.text));
       await this.save();
     } catch (error) {
