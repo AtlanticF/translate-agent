@@ -4,6 +4,7 @@ import type { CopilotRequest } from "../prompts/system.memory.js";
 import {
   copilotKey,
   CopilotScreen,
+  rejectReasonHint,
   reviewProgress,
   submittedReason,
   submittedRefinement,
@@ -54,6 +55,8 @@ test("maps review keys and ignores a blank reason", () => {
   expect(copilotKey("x")).toBeUndefined();
   expect(submittedReason("  \n")).toBeUndefined();
   expect(submittedReason(" 太直译 \n")).toBe("太直译");
+  expect(submittedReason(`${rejectReasonHint}\n`)).toBeUndefined();
+  expect(submittedReason(`${rejectReasonHint}\n语气不对\n`)).toBe("语气不对");
   expect(submittedRefinement(" \n")).toBeUndefined();
   expect(submittedRefinement("您好\n")).toBe("您好\n");
   expect(reviewProgress(1, 3, 1)).toEqual({ percent: 50, remaining: 2 });

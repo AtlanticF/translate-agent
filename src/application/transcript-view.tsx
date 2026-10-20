@@ -1,4 +1,4 @@
-import { Spinner } from "@inkjs/ui";
+import { useSpinner } from "@inkjs/ui";
 import { Box, Text } from "ink";
 import type { ReactElement } from "react";
 import type { ModelMessage } from "ai";
@@ -19,9 +19,11 @@ export function TranscriptView({
 }
 
 export function ProcessingBox(): ReactElement {
+  const { frame } = useSpinner({});
   return (
-    <Box borderStyle="round" borderColor="cyan" paddingX={1} marginTop={1}>
-      <Spinner label={processingLabel} />
+    <Box borderStyle="round" borderColor="cyan" paddingX={1} marginTop={1} gap={1}>
+      <Text color="white">{frame}</Text>
+      <Text color="cyan">{processingLabel}</Text>
     </Box>
   );
 }

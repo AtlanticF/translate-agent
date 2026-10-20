@@ -29,9 +29,16 @@ export function copilotKey(input: string): CopilotKey | undefined {
   return undefined;
 }
 
+export const rejectReasonHint = "# Please provide a reason for rejection:";
+
+// 提示行只告诉用户这里要写原因，不把它当成原因本身。
 export function submittedReason(text: string): string | undefined {
-  const trimmed = text.trim();
-  return trimmed === "" ? undefined : trimmed;
+  const reason = text
+    .split("\n")
+    .filter((line) => line.trim() !== rejectReasonHint)
+    .join("\n")
+    .trim();
+  return reason === "" ? undefined : reason;
 }
 
 // 译文保留编辑器保存的内容。只有整段空白才当成取消。
@@ -96,7 +103,8 @@ export function CopilotScreen({
 
     busy.current = true;
     setError(undefined);
-    const initial = action === "refine" ? current.translate_string : "";
+    const initial =
+      action === "refine" ? current.translate_string : `${rejectReasonHint}\n`;
     void openEditor(initial)
       .then((text) => {
         if (action === "reject") {

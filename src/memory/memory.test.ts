@@ -121,6 +121,11 @@ test("extracts ops from the memory model and saves them", async () => {
   expect(generateTextMock).toHaveBeenCalledWith(
     expect.objectContaining({
       prompt: expect.stringContaining("[]"),
+      providerOptions: {
+        openrouter: {
+          reasoning: { enabled: false },
+        },
+      },
     }),
   );
 });
@@ -144,6 +149,61 @@ test("reads the ops object when the model adds text after it", async () => {
   expect(memory.current).toEqual([
     { index: 0, text: "Use 您.", tags: ["style"] },
   ]);
+});
+
+test("uses only the last valid ops payload", async () => {
+  generateTextMock.mockResolvedValue({
+    text: [
+      '{"ops":[{"action":"add","index":-1,"text":"Use 您.","tags":["style"]}]}',
+      '{"ops":[{"action":"add","index":-1,"text":"Keep names.","tags":["terminology"]}]}',
+    ].join("\n"),
+  } as unknown as Awaited<ReturnType<typeof generateText>>);
+  const { memory } = await tempMemory();
+  await memory.init();
+
+  await memory.extractMemory({ req: request, res: rejected });
+
+  expect(memory.current).toEqual([
+    { index: 0, text: "Keep names.", tags: ["terminology"] },
+  ]);
+});
+
+test("ignores a draft inside the thinking block", async () => {
+  generateTextMock.mockResolvedValue({
+    text: [
+      "Thinking Process:",
+      "```json",
+      '{"ops":[{"action":"add","index":-1,"text":"Draft.","tags":["style"]}]}',
+      "```",
+      "</think>",
+      '{"ops":[{"action":"add","index":-1,"text":"Use 您.","tags":["style"]}]}',
+    ].join("\n"),
+  } as unknown as Awaited<ReturnType<typeof generateText>>);
+  const { memory } = await tempMemory();
+  await memory.init();
+
+  await memory.extractMemory({ req: request, res: rejected });
+
+  expect(memory.current).toEqual([
+    { index: 0, text: "Use 您.", tags: ["style"] },
+  ]);
+});
+
+test("does not apply an earlier draft when the last ops payload is invalid", async () => {
+  generateTextMock.mockResolvedValue({
+    text: [
+      '{"ops":[{"action":"add","index":-1,"text":"Use 您.","tags":["style"]}]}',
+      '{"ops":[{"action":"add","index":-1,"text":"broken"}]}',
+    ].join("\n"),
+  } as unknown as Awaited<ReturnType<typeof generateText>>);
+  const { memory } = await tempMemory();
+  memory.current = [{ index: 0, text: "Keep.", tags: ["style"] }];
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  await memory.extractMemory({ req: request, res: rejected });
+
+  expect(memory.current).toEqual([{ index: 0, text: "Keep.", tags: ["style"] }]);
+  error.mockRestore();
 });
 
 test("keeps the current list when the memory response is not JSON", async () => {
