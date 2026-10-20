@@ -1,10 +1,20 @@
 import { renderToString } from "ink";
 import { expect, test } from "vitest";
-import { appName, inputPlaceholder, submittedUserText, UserScreen, welcome } from "./user-screen.js";
+import {
+  appName,
+  inputPlaceholder,
+  logo,
+  submittedUserText,
+  UserScreen,
+  welcome,
+} from "./user-screen.js";
 
 test("shows a welcome and a bordered input when the conversation is empty", () => {
   const output = renderToString(<UserScreen messages={[]} onSubmit={() => {}} />);
 
+  for (const line of logo.split("\n")) {
+    expect(output).toContain(line);
+  }
   expect(output).toContain(appName);
   expect(output).toContain(welcome);
   expect(output).toContain("LS         列出目录");
