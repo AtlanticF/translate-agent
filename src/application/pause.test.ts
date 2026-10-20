@@ -38,6 +38,14 @@ test("reports each step before deciding to pause", async () => {
   expect(seen).toEqual(["agent", "user"]);
 });
 
+test("stops when the signal is already aborted", async () => {
+  const loop = script([step("agent"), step("user")]);
+  const signal = AbortSignal.abort();
+
+  await expect(runUntilPause(loop, undefined, signal)).resolves.toEqual({ kind: "user" });
+  expect(loop.next).not.toHaveBeenCalled();
+});
+
 test("keeps stepping while the agent has no copilot request", async () => {
   const loop = script([step("agent"), step("agent"), step("user")]);
 

@@ -55,6 +55,17 @@ test("shows messages and the input", () => {
   expect(output).not.toContain(welcomeTitle);
 });
 
+test("lists the commands when the input starts with a slash", () => {
+  const output = renderToString(
+    <UserScreen messages={[]} initialValue="/" onSubmit={() => {}} />,
+  );
+
+  expect(output).toContain("/exit  Exit");
+  expect(output).toContain("/compact  Compact the conversation");
+  expect(output).toContain("/memory  Show stored memory");
+  expect(output.indexOf("/exit")).toBeGreaterThan(output.indexOf("╭"));
+});
+
 test("drops a blank user message", () => {
   expect(submittedUserText("  \n")).toBeUndefined();
   expect(submittedUserText(" 你好 \n")).toBe("你好");

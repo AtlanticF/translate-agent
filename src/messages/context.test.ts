@@ -1,11 +1,34 @@
-import type { ModelMessage } from "ai";
-import { expect, test } from "vitest";
+import { generateText, type ModelMessage } from "ai";
+import { beforeEach, expect, test, vi } from "vitest";
 import { Context } from "./context.js";
+import { COMPACT_INSTRUCTION, SYSTEM_COMPACT } from "../prompts/system.compact.js";
+
+vi.mock("../ai/llm.js", () => ({
+  models: {
+    translator: { modelId: "translator-test" },
+    compact: { modelId: "compact-test" },
+  },
+}));
+
+vi.mock("ai", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("ai")>();
+  return {
+    ...actual,
+    generateText: vi.fn(),
+  };
+});
+
+const generateTextMock = vi.mocked(generateText);
+
+beforeEach(() => {
+  generateTextMock.mockReset();
+});
 
 test("starts empty", () => {
   const context = new Context();
 
   expect(context.getMessages()).toEqual([]);
+  expect(context.getModelMessages()).toEqual([]);
   expect(context.toModelMessages()).toEqual([]);
 });
 
@@ -110,4 +133,39 @@ test("returns copilot responses for the requested tool calls", () => {
 
   expect(context.getCopilotResponses(["call-1"])).toEqual([approve, refined]);
   expect(context.getCopilotResponses(["call-2", "missing"])).toEqual([other]);
+});
+
+test("keeps human history and replaces the model messages on compact", async () => {
+  generateTextMock.mockResolvedValue({
+    text: "<analysis>\n shortened \n</analysis>\n<summary>\n hello world \n</summary>",
+  } as unknown as Awaited<ReturnType<typeof generateText>>);
+  const context = new Context<ModelMessage>([{ role: "user", content: "translate" }]);
+  context.addMessages([{ role: "assistant", content: "done" }]);
+
+  await expect(context.compact()).resolves.toEqual({
+    analysis: "shortened",
+    summary: "hello world",
+  });
+
+  expect(context.getMessages()).toEqual([
+    { role: "user", content: "translate" },
+    { role: "assistant", content: "done" },
+  ]);
+  const summary = {
+    role: "assistant",
+    content: [{ type: "text", text: "hello world" }],
+  };
+  expect(context.getModelMessages()).toEqual([summary]);
+  expect(context.toModelMessages()).toEqual([summary]);
+  expect(generateTextMock).toHaveBeenCalledWith(
+    expect.objectContaining({
+      model: { modelId: "compact-test" },
+      system: SYSTEM_COMPACT,
+      messages: [
+        { role: "user", content: "translate" },
+        { role: "assistant", content: "done" },
+        { role: "user", content: COMPACT_INSTRUCTION },
+      ],
+    }),
+  );
 });

@@ -1,4 +1,4 @@
-import type { AgentLoop, AgentLoopNext } from "../agent/agent-loop.js";
+import type { AgentLoopNext } from "../agent/agent-loop.js";
 import type { CopilotRequest } from "../prompts/system.memory.js";
 
 export type Pause =
@@ -7,11 +7,18 @@ export type Pause =
 
 // 协同请求出现时 actor 仍是 agent。先看请求，避免在同一次审核上反复调用 next。
 export async function runUntilPause(
-  loop: Pick<AgentLoop, "next">,
+  loop: { next: (signal?: AbortSignal) => Promise<AgentLoopNext> },
   onStep?: (step: AgentLoopNext) => void,
+  signal?: AbortSignal,
 ): Promise<Pause> {
   for (;;) {
-    const step = await loop.next();
+    if (signal?.aborted) {
+      return { kind: "user" };
+    }
+    const step = await loop.next(signal);
+    if (signal?.aborted) {
+      return { kind: "user" };
+    }
     onStep?.(step);
     const pause = pauseFor(step);
     if (pause) {

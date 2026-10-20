@@ -8,12 +8,14 @@ const original = {
   key: process.env.OPENROUTER_API_KEY,
   translator: process.env.TRANSLATOR_MODEL,
   memory: process.env.MEMORY_MODEL,
+  compact: process.env.COMPACT_MODEL,
 };
 
 afterEach(() => {
   restore("OPENROUTER_API_KEY", original.key);
   restore("TRANSLATOR_MODEL", original.translator);
   restore("MEMORY_MODEL", original.memory);
+  restore("COMPACT_MODEL", original.compact);
 });
 
 test("requires an API key", () => {
@@ -26,8 +28,10 @@ test("uses the current model names when they are not configured", () => {
 
   expect(config.translatorModel).toBe(defaultModelIds.translator);
   expect(config.memoryModel).toBe(defaultModelIds.memory);
+  expect(config.compactModel).toBe(defaultModelIds.compact);
   expect(config.translatorModel).toBe("z-ai/glm-4.5");
   expect(config.memoryModel).toBe("google/gemini-2.5-flash");
+  expect(config.compactModel).toBe("google/gemini-2.5-flash");
 });
 
 test("reads model names from the environment", () => {
@@ -35,11 +39,13 @@ test("reads model names from the environment", () => {
     OPENROUTER_API_KEY: "test-key",
     TRANSLATOR_MODEL: "custom/translator",
     MEMORY_MODEL: " custom/memory ",
+    COMPACT_MODEL: " custom/compact ",
   });
 
   expect(config.apiKey).toBe("test-key");
   expect(config.translatorModel).toBe("custom/translator");
   expect(config.memoryModel).toBe("custom/memory");
+  expect(config.compactModel).toBe("custom/compact");
 });
 
 test("loads a missing env file as empty", () => {
@@ -50,6 +56,7 @@ test("loads the API key and model names from a file", () => {
   delete process.env.OPENROUTER_API_KEY;
   delete process.env.TRANSLATOR_MODEL;
   delete process.env.MEMORY_MODEL;
+  delete process.env.COMPACT_MODEL;
   const dir = mkdtempSync(join(tmpdir(), "translate-agent-"));
   const path = join(dir, ".env");
   writeFileSync(
@@ -58,6 +65,7 @@ test("loads the API key and model names from a file", () => {
       "OPENROUTER_API_KEY=from-file",
       "TRANSLATOR_MODEL=file/translator",
       "MEMORY_MODEL=file/memory",
+      "COMPACT_MODEL=file/compact",
       "",
     ].join("\n"),
   );
@@ -68,6 +76,7 @@ test("loads the API key and model names from a file", () => {
     apiKey: "from-file",
     translatorModel: "file/translator",
     memoryModel: "file/memory",
+    compactModel: "file/compact",
   });
 });
 

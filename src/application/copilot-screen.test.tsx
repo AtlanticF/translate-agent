@@ -2,6 +2,8 @@ import { renderToString } from "ink";
 import { expect, test } from "vitest";
 import type { CopilotRequest } from "../prompts/system.memory.js";
 import {
+  reviewExit,
+  userExitNote,
   copilotKey,
   CopilotScreen,
   rejectReasonHint,
@@ -38,6 +40,7 @@ test("shows the current review and the choice keys", () => {
   expect(output).toContain("通过");
   expect(output).toContain("拒绝");
   expect(output).toContain("修改");
+  expect(output).toContain("退出");
   expect(output).toContain("0%");
   expect(output).toContain("剩余 2");
 });
@@ -60,4 +63,40 @@ test("maps review keys and ignores a blank reason", () => {
   expect(submittedRefinement(" \n")).toBeUndefined();
   expect(submittedRefinement("您好\n")).toBe("您好\n");
   expect(reviewProgress(1, 3, 1)).toEqual({ percent: 50, remaining: 2 });
+  expect(reviewExit([first, second], [])).toEqual({
+    kept: [],
+    failures: {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "call-1",
+          toolName: "Translate",
+          output: { type: "error-text", value: userExitNote },
+        },
+        {
+          type: "tool-result",
+          toolCallId: "call-2",
+          toolName: "Translate",
+          output: { type: "error-text", value: userExitNote },
+        },
+      ],
+    },
+  });
+  expect(
+    reviewExit([first, second], [{ status: "approve", tool: { callId: "call-1" } }]),
+  ).toEqual({
+    kept: [{ status: "approve", tool: { callId: "call-1" } }],
+    failures: {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "call-2",
+          toolName: "Translate",
+          output: { type: "error-text", value: userExitNote },
+        },
+      ],
+    },
+  });
 });
