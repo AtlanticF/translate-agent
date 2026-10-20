@@ -6,7 +6,11 @@ import { lsExecutor, lsTool } from "../tools/ls-tool.js";
 import { readExecutor, readTool } from "../tools/read-tool.js";
 import { createTranslateExecutor, translateTool } from "../tools/translate-tool.js";
 
-export async function createSession(): Promise<{ loop: AgentLoop; context: Context }> {
+export async function createSession(): Promise<{
+  loop: AgentLoop;
+  context: Context;
+  memory: Memory;
+}> {
   const context = new Context();
   const memory = new Memory();
   await memory.init();
@@ -26,7 +30,7 @@ export async function createSession(): Promise<{ loop: AgentLoop; context: Conte
     { memory },
   );
 
-  return { loop, context };
+  return { loop, context, memory };
 }
 
 async function writeTranslation({

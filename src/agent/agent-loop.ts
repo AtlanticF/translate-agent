@@ -57,8 +57,16 @@ export class AgentLoop {
     return [...this.context.getMessages()];
   }
 
-  async next(): Promise<AgentLoopNext> {
-    const step = await this.resolveStep();
+  async next(signal?: AbortSignal): Promise<AgentLoopNext> {
+    if (signal?.aborted) {
+      return {
+        nextActor: "user",
+        unprocessedToolCalls: this.getUnprocessedToolCalls(),
+        copilotRequests: [],
+        messages: [],
+      };
+    }
+    const step = await this.resolveStep(signal);
     // 先写入新消息，再统计未执行的 tool，返回值才能反映这一步之后的状态。
     this.context.addMessages(step.messages);
 
@@ -71,7 +79,7 @@ export class AgentLoop {
     };
   }
 
-  private async resolveStep(): Promise<NextStep> {
+  private async resolveStep(signal?: AbortSignal): Promise<NextStep> {
     // 还没有消息，说明是第一次进入，等用户输入。
     if (this.context.toModelMessages().length === 0) {
       return { messages: [], actor: "user", copilotRequests: [] };
@@ -79,7 +87,7 @@ export class AgentLoop {
 
     const pending = this.getUnprocessedToolCalls();
     if (pending.length === 0) {
-      return this.askModel();
+      return this.askModel(signal);
     }
 
     return this.runTools(pending);
@@ -110,17 +118,26 @@ export class AgentLoop {
     return Object.values(parts);
   }
 
-  private async askModel(): Promise<NextStep> {
-    const result = await generateText({
-      model: models.translator,
-      system: SYSTEM_WORKFLOW({
-        currentMemory: this.options.memory?.provideMemory() ?? "",
-      }),
-      // 去掉 execute，避免 SDK 自己跑工具；协同请求要由这里拦截。
-      tools: toolsWithoutExecute(this.toolsDef),
-      messages: this.context.toModelMessages(),
-      stopWhen: stepCountIs(1),
-    });
+  private async askModel(signal?: AbortSignal): Promise<NextStep> {
+    let result: Awaited<ReturnType<typeof generateText>>;
+    try {
+      result = await generateText({
+        model: models.translator,
+        system: SYSTEM_WORKFLOW({
+          currentMemory: this.options.memory?.provideMemory() ?? "",
+        }),
+        // 去掉 execute，避免 SDK 自己跑工具；协同请求要由这里拦截。
+        tools: toolsWithoutExecute(this.toolsDef),
+        messages: this.context.toModelMessages(),
+        stopWhen: stepCountIs(1),
+        abortSignal: signal,
+      });
+    } catch (error) {
+      if (signal?.aborted) {
+        return { messages: [], actor: "user", copilotRequests: [] };
+      }
+      throw error;
+    }
 
     // finalStep.response 是当前推荐入口，顶层 result.response 已废弃。
     const responseMessages = result.finalStep.response.messages;

@@ -4,7 +4,13 @@ import type { ReactElement } from "react";
 import { expect, test } from "vitest";
 import type { AgentLoopNext } from "../agent/agent-loop.js";
 import type { CopilotRequest } from "../prompts/system.memory.js";
-import { App, submitCopilotReview, submitUserText, type AppSession } from "./entry.js";
+import {
+  App,
+  settleReview,
+  submitCopilotReview,
+  submitUserText,
+  type AppSession,
+} from "./entry.js";
 import { processingLabel } from "./transcript.js";
 import { inputPlaceholder } from "./user-screen.js";
 
@@ -105,6 +111,48 @@ test("user submit records the message before the loop continues", async () => {
   expect(events).toEqual(["input:你好", "next"]);
 });
 
+test("a cancelled review is stored as a failed tool result", async () => {
+  const events: string[] = [];
+  const current = session({
+    async next() {
+      events.push("next");
+      return step("agent");
+    },
+    async getMessages() {
+      events.push("messages");
+      return [];
+    },
+  });
+  current.context.addMessages = (messages) => {
+    events.push(`failed:${JSON.stringify(messages)}`);
+  };
+  current.context.addCopilotResponses = () => {
+    events.push("saved");
+  };
+
+  await settleReview(current, {
+    kept: [{ status: "approve", tool: { callId: "call-1" } }],
+    failures: {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "call-2",
+          toolName: "Translate",
+          output: { type: "error-text", value: "用户主动退出" },
+        },
+      ],
+    },
+  });
+
+  expect(events).toEqual([
+    'failed:[{"role":"tool","content":[{"type":"tool-result","toolCallId":"call-2","toolName":"Translate","output":{"type":"error-text","value":"用户主动退出"}}]}]',
+    "saved",
+    "next",
+    "messages",
+  ]);
+});
+
 test("copilot submit stores the review before the loop continues", async () => {
   const events: string[] = [];
   const current = session({
@@ -172,8 +220,13 @@ function session(overrides: Partial<AppSession["loop"]> = {}): AppSession {
       ...overrides,
     },
     context: {
+      addMessages() {},
       addCopilotResponses() {},
+      async compact() {
+        return { analysis: "", summary: "" };
+      },
     },
+    memory: { current: [] },
   };
 }
 

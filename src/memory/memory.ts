@@ -35,7 +35,7 @@ export class Memory implements MemorySource {
   async init(): Promise<void> {
     try {
       const parsed: unknown = JSON.parse(await readFile(this.filePath, "utf8"));
-      this.current = isMemoryList(parsed) ? parsed : [];
+      this.current = isMemoryList(parsed) ? reindex(parsed) : [];
     } catch {
       this.current = [];
     }
@@ -67,6 +67,7 @@ export class Memory implements MemorySource {
         tags: op.tags,
       };
     }
+    this.current = reindex(this.current);
   }
 
   async save(): Promise<void> {
@@ -204,6 +205,10 @@ function jsonObjects(text: string): string[] {
   }
 
   return objects;
+}
+
+function reindex(items: readonly MemoryItem[]): MemoryItem[] {
+  return items.map((item, index) => ({ ...item, index }));
 }
 
 function isMemoryList(value: unknown): value is MemoryItem[] {

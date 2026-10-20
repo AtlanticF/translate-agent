@@ -8,6 +8,9 @@ export const openRouterModelIds = {
   get memory() {
     return readAppEnv().memoryModel;
   },
+  get compact() {
+    return readAppEnv().compactModel;
+  },
 };
 
 export const openRouterBaseURL = "https://openrouter.ai/api/v1";
@@ -34,5 +37,9 @@ export const models = {
   get memory() {
     const config = readAppEnv();
     return openrouter(config.apiKey)(config.memoryModel);
+  },
+  get compact() {
+    const config = readAppEnv();
+    return openrouter(config.apiKey)(config.compactModel);
   },
 };

@@ -9,18 +9,21 @@ const original = {
   key: process.env.OPENROUTER_API_KEY,
   translator: process.env.TRANSLATOR_MODEL,
   memory: process.env.MEMORY_MODEL,
+  compact: process.env.COMPACT_MODEL,
 };
 
 afterEach(() => {
   restore("OPENROUTER_API_KEY", original.key);
   restore("TRANSLATOR_MODEL", original.translator);
   restore("MEMORY_MODEL", original.memory);
+  restore("COMPACT_MODEL", original.compact);
 });
 
 test("accepts both models when the probe succeeds", async () => {
   process.env.OPENROUTER_API_KEY = "test-key";
   delete process.env.TRANSLATOR_MODEL;
   delete process.env.MEMORY_MODEL;
+  delete process.env.COMPACT_MODEL;
   const seen: string[] = [];
 
   await checkModels(
@@ -37,6 +40,7 @@ test("names the model that the probe rejects", async () => {
   process.env.OPENROUTER_API_KEY = "test-key";
   delete process.env.TRANSLATOR_MODEL;
   delete process.env.MEMORY_MODEL;
+  delete process.env.COMPACT_MODEL;
 
   const error = await checkModels(
     async (model) => {
@@ -57,6 +61,7 @@ test("probes a shared model id once", async () => {
   process.env.OPENROUTER_API_KEY = "test-key";
   process.env.TRANSLATOR_MODEL = "google/gemini-2.5-flash";
   process.env.MEMORY_MODEL = "google/gemini-2.5-flash";
+  delete process.env.COMPACT_MODEL;
   let calls = 0;
 
   await checkModels(
@@ -81,6 +86,7 @@ test("skips a model that passed within 24 hours", async () => {
   process.env.OPENROUTER_API_KEY = "test-key";
   delete process.env.TRANSLATOR_MODEL;
   delete process.env.MEMORY_MODEL;
+  delete process.env.COMPACT_MODEL;
   const cachePath = await tempCache();
   const now = Date.parse("2026-10-20T00:00:00.000Z");
   let calls = 0;
@@ -119,6 +125,7 @@ test("probes again after the cache expires", async () => {
   process.env.OPENROUTER_API_KEY = "test-key";
   process.env.TRANSLATOR_MODEL = "google/gemini-2.5-flash";
   process.env.MEMORY_MODEL = "google/gemini-2.5-flash";
+  delete process.env.COMPACT_MODEL;
   const cachePath = await tempCache();
   const start = Date.parse("2026-10-20T00:00:00.000Z");
   let calls = 0;

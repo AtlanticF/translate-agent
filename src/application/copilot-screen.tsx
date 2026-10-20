@@ -1,4 +1,5 @@
 import { ProgressBar } from "@inkjs/ui";
+import type { ModelMessage } from "ai";
 import { Box, Text, useApp, useInput, useWindowSize } from "ink";
 import { useRef, useState, type ReactElement } from "react";
 import type { CopilotResponseEntry } from "../messages/context.js";
@@ -11,8 +12,39 @@ type CopilotScreenProps = {
   done?: readonly Paragraph[];
   requests: readonly CopilotRequest[];
   onSubmit: (responses: CopilotResponseEntry[]) => void;
+  onEscape?: (exit: ReviewExit) => void;
   edit?: (initial: string) => Promise<string>;
 };
+
+export const userExitNote = "用户主动退出";
+
+export type ReviewExit = {
+  kept: CopilotResponseEntry[];
+  failures?: ModelMessage;
+};
+
+export function reviewExit(
+  requests: readonly CopilotRequest[],
+  decided: readonly CopilotResponseEntry[] = [],
+): ReviewExit {
+  const done = new Set(decided.map((response) => response.tool.callId));
+  const cancelled = requests.filter((request) => !done.has(request.tool.callId));
+  if (cancelled.length === 0) {
+    return { kept: [...decided] };
+  }
+  return {
+    kept: [...decided],
+    failures: {
+      role: "tool",
+      content: cancelled.map((request) => ({
+        type: "tool-result" as const,
+        toolCallId: request.tool.callId,
+        toolName: request.tool.name,
+        output: { type: "error-text" as const, value: userExitNote },
+      })),
+    },
+  };
+}
 
 export type CopilotKey = "approve" | "reject" | "refine";
 
@@ -66,6 +98,7 @@ export function CopilotScreen({
   done = [],
   requests,
   onSubmit,
+  onEscape,
   edit,
 }: CopilotScreenProps): ReactElement {
   const { columns } = useWindowSize();
@@ -86,7 +119,15 @@ export function CopilotScreen({
       return next;
     });
 
-  useInput((input) => {
+  useInput((input, key) => {
+    if (key.escape) {
+      if (busy.current || finished.current) {
+        return;
+      }
+      finished.current = true;
+      onEscape?.(reviewExit(requests, responses.current));
+      return;
+    }
     const current = requests[responses.current.length];
     if (!current || busy.current || finished.current) {
       return;
@@ -156,6 +197,9 @@ export function CopilotScreen({
           </Text>
           <Text>
             <Text color="cyan">f</Text> 修改
+          </Text>
+          <Text>
+            <Text color="cyan">esc</Text> 退出
           </Text>
         </Box>
         <Box flexDirection="column" alignItems="flex-end" width={16}>

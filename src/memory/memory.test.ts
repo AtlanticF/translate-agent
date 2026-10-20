@@ -90,6 +90,42 @@ test("applies add, update, and delete", async () => {
   );
 });
 
+test("renumbers indexes after a delete leaves a gap", () => {
+  const memory = new Memory("/tmp/unused-memory.json");
+  memory.current = [
+    { index: 0, text: "A", tags: ["style"] },
+    { index: 1, text: "B", tags: ["style"] },
+  ];
+
+  memory.applyOps([
+    { action: "delete", index: 0, text: "", tags: [] },
+    { action: "add", index: -1, text: "C", tags: ["preference"] },
+  ]);
+
+  expect(memory.current).toEqual([
+    { index: 0, text: "B", tags: ["style"] },
+    { index: 1, text: "C", tags: ["preference"] },
+  ]);
+});
+
+test("renumbers duplicate indexes when the file is loaded", async () => {
+  const { memory, filePath } = await tempMemory();
+  await writeFile(
+    filePath,
+    JSON.stringify([
+      { index: 1, text: "A", tags: ["style"] },
+      { index: 1, text: "B", tags: ["style"] },
+    ]),
+  );
+
+  await memory.init();
+
+  expect(memory.current).toEqual([
+    { index: 0, text: "A", tags: ["style"] },
+    { index: 1, text: "B", tags: ["style"] },
+  ]);
+});
+
 test("saves the list and reads it back", async () => {
   const { memory, filePath } = await tempMemory();
   memory.current = [{ index: 0, text: "Use 您.", tags: ["style"] }];

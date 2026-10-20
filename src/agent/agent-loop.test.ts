@@ -81,6 +81,26 @@ test("stores user messages and returns the model reply", async () => {
   );
 });
 
+test("stops the model call when the signal is aborted", async () => {
+  const signal = new AbortController();
+  generateTextMock.mockImplementation(async () => {
+    signal.abort();
+    throw new Error("aborted");
+  });
+  const context = new Context([{ role: "user", content: "translate" }]);
+  const loop = new AgentLoop({}, {}, context);
+
+  await expect(loop.next(signal.signal)).resolves.toMatchObject({
+    nextActor: "user",
+    messages: [],
+    copilotRequests: [],
+  });
+  expect(generateTextMock).toHaveBeenCalledWith(
+    expect.objectContaining({ abortSignal: signal.signal }),
+  );
+  await expect(loop.getMessages()).resolves.toEqual([{ role: "user", content: "translate" }]);
+});
+
 test("sends saved preferences to the translator", async () => {
   generateTextMock.mockResolvedValue({
     toolCalls: [],

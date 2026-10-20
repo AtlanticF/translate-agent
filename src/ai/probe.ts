@@ -58,6 +58,7 @@ export async function checkModels(
   const targets = [
     { id: config.translatorModel, model: models.translator },
     { id: config.memoryModel, model: models.memory },
+    { id: config.compactModel, model: models.compact },
   ];
   const seen = new Set<string>();
   const unique = targets.filter((target) => {
