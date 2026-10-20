@@ -49,10 +49,10 @@ Return strict JSON:
 {
   "ops": [
     {
-      "action": "add",
-      "index": -1,
-      "text": "Use a formal address in user-facing copy. Example: prefer 您 over 你.",
-      "tags": ["style"]
+      "action": "add" | "update" | "delete",
+      "index": number,            // index of the memory item to update or delete, or -1 for new items
+      "text": "string",           // for add or update, the full instruction sentence with example
+      "tags": ["style"|"preference"|"terminology"]           // for update or add, the tags for this memory item
     }
   ]
 }
