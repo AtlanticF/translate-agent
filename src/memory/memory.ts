@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { appendFile, readFile, writeFile } from "node:fs/promises";
 import { generateText } from "ai";
 import { models } from "../ai/llm.js";
 import {
@@ -94,7 +94,16 @@ export class Memory implements MemorySource {
           res,
           currentMemory: JSON.stringify(this.current),
         }),
+        providerOptions: {
+          openrouter: {
+            reasoning: { enabled: false },
+          },
+        },
       });
+      await appendFile("/tmp/translator-agent.log", `[memory] Current memory: ${JSON.stringify(this.current)}\n`);
+      // write log into file: /tmp/translator-agent.log
+      await appendFile("/tmp/translator-agent.log", `[memory] LLM response: ${result.text}\n`);
+      // console.info("[memory] LLM response:", result.text);
       this.applyOps(parseMemoryOps(result.text));
       await this.save();
     } catch (error) {
@@ -105,40 +114,43 @@ export class Memory implements MemorySource {
 }
 
 function parseMemoryOps(text: string): MemoryOp[] {
-  const parsed = lastOpsPayload(text);
-  if (
-    typeof parsed !== "object" ||
-    parsed === null ||
-    !("ops" in parsed) ||
-    !Array.isArray(parsed.ops)
-  ) {
-    throw new Error("memory response has no ops");
-  }
+  const objects = jsonObjects(answerText(text).replace(/```(?:json)?/g, ""));
+  let chosen: MemoryOp[] | undefined;
+  let invalid = false;
 
-  return parsed.ops.map((op) => {
-    if (!isMemoryOp(op)) {
-      throw new Error("memory response has an invalid op");
-    }
-    return op;
-  });
-}
-
-function lastOpsPayload(text: string): unknown {
-  const objects = jsonObjects(text.replace(/```(?:json)?/g, ""));
-  for (let index = objects.length - 1; index >= 0; index -= 1) {
+  for (const object of objects) {
+    let parsed: unknown;
     try {
-      const parsed: unknown = JSON.parse(objects[index] ?? "");
-      if (hasOps(parsed)) {
-        return parsed;
-      }
+      parsed = JSON.parse(object);
     } catch {
       continue;
     }
+    if (!hasOps(parsed)) {
+      continue;
+    }
+    if (!parsed.ops.every(isMemoryOp)) {
+      chosen = undefined;
+      invalid = true;
+      continue;
+    }
+    chosen = parsed.ops;
+    invalid = false;
   }
-  throw new Error("memory response has no JSON object");
+
+  if (chosen === undefined) {
+    throw new Error(invalid ? "memory response has an invalid op" : "memory response has no ops");
+  }
+  return chosen;
 }
 
-function hasOps(value: unknown): boolean {
+// 思考写在正文里时，正式结果在最后一次 </think> 之后。
+function answerText(text: string): string {
+  const marker = "</think>";
+  const at = text.lastIndexOf(marker);
+  return at === -1 ? text : text.slice(at + marker.length);
+}
+
+function hasOps(value: unknown): value is { ops: unknown[] } {
   return (
     typeof value === "object" &&
     value !== null &&
