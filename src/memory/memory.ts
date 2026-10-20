@@ -1,4 +1,4 @@
-import { appendFile, readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { generateText } from "ai";
 import { models } from "../ai/llm.js";
 import {
