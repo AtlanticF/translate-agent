@@ -5,12 +5,12 @@ import { useEffect, useRef, useState, type ReactElement } from "react";
 import type { AgentLoopNext } from "../agent/agent-loop.js";
 import type { CopilotResponseEntry } from "../messages/context.js";
 import type { CopilotRequest } from "../prompts/system.memory.js";
-import { activityItems, waitingLabel, type ActivityItem } from "./activity.js";
 import { ActivityScreen } from "./activity-screen.js";
 import { CopilotScreen } from "./copilot-screen.js";
 import { rememberReview, type Paragraph } from "./paragraphs.js";
 import { runUntilPause, type Pause } from "./pause.js";
 import { createSession } from "./session.js";
+import { startup } from "./startup.js";
 import { UserScreen } from "./user-screen.js";
 
 export type AppSession = {
@@ -25,7 +25,7 @@ export type AppSession = {
 };
 
 type Screen =
-  | { kind: "running"; items: ActivityItem[]; waiting: string }
+  | { kind: "running"; messages: ModelMessage[]; processing: boolean }
   | { kind: "error"; message: string }
   | { kind: "user"; messages: ModelMessage[] }
   | { kind: "copilot"; requests: CopilotRequest[] };
@@ -55,8 +55,8 @@ export async function submitCopilotReview(
 export function App({ start = createSession }: AppProps): ReactElement {
   const [screen, setScreen] = useState<Screen>({
     kind: "running",
-    items: [],
-    waiting: "正在准备",
+    messages: [],
+    processing: true,
   });
   const alive = useRef(true);
   const sessionRef = useRef<AppSession | undefined>(undefined);
@@ -78,7 +78,7 @@ export function App({ start = createSession }: AppProps): ReactElement {
           return;
         }
         sessionRef.current = session;
-        const pause = await watch("正在准备", (onStep) => runUntilPause(session.loop, onStep));
+        const pause = await watch([], (onStep) => runUntilPause(session.loop, onStep));
         if (cancelled) {
           return;
         }
@@ -93,7 +93,7 @@ export function App({ start = createSession }: AppProps): ReactElement {
 
   // 运行中只展示过程，不挂输入，避免按键和外部编辑器抢终端。
   if (screen.kind === "running") {
-    return <ActivityScreen items={screen.items} waiting={screen.waiting} />;
+    return <ActivityScreen messages={screen.messages} processing={screen.processing} />;
   }
   if (screen.kind === "error") {
     return <Text>出错: {screen.message}</Text>;
@@ -135,22 +135,18 @@ export function App({ start = createSession }: AppProps): ReactElement {
   }
 
   async function watch(
-    waiting: string,
+    seed: readonly ModelMessage[],
     run: (onStep: (step: AgentLoopNext) => void) => Promise<Pause>,
   ): Promise<Pause> {
-    const items: ActivityItem[] = [];
-    setScreen({ kind: "running", items, waiting });
+    const messages = [...seed];
+    setScreen({ kind: "running", messages, processing: true });
     return run((step) => {
-      items.push(...activityItems(step));
+      messages.push(...step.messages);
       if (!alive.current) {
         return;
       }
-      const stillRunning = step.copilotRequests.length === 0 && step.nextActor !== "user";
-      setScreen({
-        kind: "running",
-        items: [...items],
-        waiting: stillRunning ? waitingLabel(step) : waiting,
-      });
+      const processing = step.copilotRequests.length === 0 && step.nextActor !== "user";
+      setScreen({ kind: "running", messages: [...messages], processing });
     });
   }
 
@@ -167,8 +163,12 @@ export function App({ start = createSession }: AppProps): ReactElement {
       return;
     }
     try {
-      const waiting = submit === submitUserText ? "正在思考" : "正在处理审核";
-      const pause = await watch(waiting, (onStep) => submit(session, argument, onStep));
+      const prior = await session.loop.getMessages();
+      const seed =
+        submit === submitUserText && typeof argument === "string"
+          ? [...prior, { role: "user" as const, content: argument }]
+          : prior;
+      const pause = await watch(seed, (onStep) => submit(session, argument, onStep));
       await show(session, pause);
     } catch (error) {
       if (alive.current) {
@@ -192,5 +192,7 @@ function isDirectRun(): boolean {
 }
 
 if (isDirectRun()) {
-  render(<App />);
+  void startup(() => {
+    render(<App />);
+  });
 }

@@ -1,0 +1,37 @@
+import { existsSync } from "node:fs";
+
+export const defaultModelIds = {
+  translator: "z-ai/glm-4.5",
+  memory: "google/gemini-2.5-flash",
+} as const;
+
+export type AppEnv = {
+  apiKey: string;
+  translatorModel: string;
+  memoryModel: string;
+};
+
+export function loadEnvFile(path = ".env"): void {
+  if (!existsSync(path)) {
+    return;
+  }
+  process.loadEnvFile(path);
+}
+
+export function readAppEnv(env: NodeJS.ProcessEnv = process.env): AppEnv {
+  const apiKey = env.OPENROUTER_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error("缺少 OPENROUTER_API_KEY，请把它写进 .env");
+  }
+
+  return {
+    apiKey,
+    translatorModel: modelName(env.TRANSLATOR_MODEL, defaultModelIds.translator),
+    memoryModel: modelName(env.MEMORY_MODEL, defaultModelIds.memory),
+  };
+}
+
+function modelName(value: string | undefined, fallback: string): string {
+  const name = value?.trim();
+  return name ? name : fallback;
+}

@@ -1,10 +1,11 @@
+import { ProgressBar } from "@inkjs/ui";
 import { Box, Text, useApp, useInput, useWindowSize } from "ink";
 import { useRef, useState, type ReactElement } from "react";
 import type { CopilotResponseEntry } from "../messages/context.js";
 import type { CopilotRequest } from "../prompts/system.memory.js";
 import { editInFile } from "./editor.js";
-import { visibleParagraphs, type Paragraph } from "./paragraphs.js";
-import { SourcePane, TranslationPane } from "./review-panes.js";
+import type { Paragraph } from "./paragraphs.js";
+import { ReviewColumns } from "./review-panes.js";
 
 type CopilotScreenProps = {
   done?: readonly Paragraph[];
@@ -41,6 +42,19 @@ export function submittedRefinement(text: string): string | undefined {
   return text;
 }
 
+export function reviewProgress(
+  doneCount: number,
+  requestCount: number,
+  index: number,
+): { percent: number; remaining: number } {
+  const total = doneCount + requestCount;
+  const finished = Math.min(doneCount + index, total);
+  return {
+    percent: total === 0 ? 0 : Math.round((finished / total) * 100),
+    remaining: total - finished,
+  };
+}
+
 export function CopilotScreen({
   done = [],
   requests,
@@ -50,7 +64,6 @@ export function CopilotScreen({
   const { columns } = useWindowSize();
   const { suspendTerminal } = useApp();
   const [index, setIndex] = useState(0);
-  const [decided, setDecided] = useState<Paragraph[]>([]);
   const [error, setError] = useState<string | undefined>();
   const responses = useRef<CopilotResponseEntry[]>([]);
   const busy = useRef(false);
@@ -77,7 +90,7 @@ export function CopilotScreen({
     }
     const callId = current.tool.callId;
     if (action === "approve") {
-      pushResponse(current, { status: "approve", tool: { callId } });
+      pushResponse({ status: "approve", tool: { callId } });
       return;
     }
 
@@ -91,14 +104,14 @@ export function CopilotScreen({
           if (reason === undefined) {
             return;
           }
-          pushResponse(current, { status: "reject", reason, tool: { callId } });
+          pushResponse({ status: "reject", reason, tool: { callId } });
           return;
         }
         const refined = submittedRefinement(text);
         if (refined === undefined) {
           return;
         }
-        pushResponse(current, {
+        pushResponse({
           status: "refined",
           refined_translated_string: refined,
           tool: { callId },
@@ -116,31 +129,38 @@ export function CopilotScreen({
     return <Text>没有待审核的译文</Text>;
   }
 
-  const paragraphs = visibleParagraphs([...done, ...decided], requests.slice(index));
-  const position = paragraphs.findIndex((item) => item.status === "current") + 1;
+  const progress = reviewProgress(done.length, requests.length, index);
 
   return (
-    <Box flexDirection="column">
-      <Text>
-        <Text dimColor>{request.file_path} </Text>
-        {position}/{paragraphs.length}
-      </Text>
-      <Box flexDirection={columns < 80 ? "column" : "row"} gap={1}>
-        <SourcePane paragraphs={paragraphs} />
-        <TranslationPane paragraphs={paragraphs} />
+    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
+      <ReviewColumns
+        source={request.src_string}
+        translation={request.translate_string}
+        direction={columns < 80 ? "column" : "row"}
+      />
+      <Box marginTop={1}>
+        <Box flexDirection="column" flexGrow={1}>
+          <Text>
+            <Text color="cyan">a</Text> 通过
+          </Text>
+          <Text>
+            <Text color="cyan">r</Text> 拒绝
+          </Text>
+          <Text>
+            <Text color="cyan">f</Text> 修改
+          </Text>
+        </Box>
+        <Box flexDirection="column" alignItems="flex-end" width={16}>
+          <Text>{progress.percent}%</Text>
+          <ProgressBar value={progress.percent} />
+          <Text dimColor>剩余 {progress.remaining}</Text>
+        </Box>
       </Box>
-      <Text>
-        <Text color="cyan">a</Text> 通过    <Text color="cyan">r</Text> 拒绝    <Text color="cyan">f</Text> 修改
-      </Text>
       {error ? <Text color="red">无法打开编辑器: {error}</Text> : null}
     </Box>
   );
 
-  function pushResponse(currentRequest: CopilotRequest, response: CopilotResponseEntry): void {
-    const paragraph = finishedParagraph(currentRequest, response);
-    if (paragraph) {
-      setDecided((items) => [...items, paragraph]);
-    }
+  function pushResponse(response: CopilotResponseEntry): void {
     responses.current.push(response);
     if (responses.current.length === requests.length) {
       finished.current = true;
@@ -149,20 +169,4 @@ export function CopilotScreen({
     }
     setIndex(responses.current.length);
   }
-}
-
-function finishedParagraph(
-  request: CopilotRequest,
-  response: CopilotResponseEntry,
-): Paragraph | undefined {
-  if (response.status === "reject") {
-    return undefined;
-  }
-  return {
-    id: request.tool.callId,
-    src: request.src_string,
-    translation:
-      response.status === "refined" ? response.refined_translated_string : request.translate_string,
-    status: "done",
-  };
 }

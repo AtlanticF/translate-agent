@@ -1,22 +1,18 @@
-import { Spinner, StatusMessage } from "@inkjs/ui";
 import { Box } from "ink";
+import type { ModelMessage } from "ai";
 import type { ReactElement } from "react";
-import type { ActivityItem } from "./activity.js";
+import { ProcessingBox, TranscriptView } from "./transcript-view.js";
 
 type ActivityScreenProps = {
-  items: readonly ActivityItem[];
-  waiting: string;
+  messages: readonly ModelMessage[];
+  processing: boolean;
 };
 
-export function ActivityScreen({ items, waiting }: ActivityScreenProps): ReactElement {
+export function ActivityScreen({ messages, processing }: ActivityScreenProps): ReactElement {
   return (
     <Box flexDirection="column">
-      {items.map((item, index) => (
-        <StatusMessage key={index} variant={item.variant}>
-          {item.text}
-        </StatusMessage>
-      ))}
-      <Spinner label={waiting} />
+      <TranscriptView messages={messages} />
+      {processing ? <ProcessingBox /> : null}
     </Box>
   );
 }

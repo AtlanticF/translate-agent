@@ -98,19 +98,14 @@ export class Memory implements MemorySource {
       this.applyOps(parseMemoryOps(result.text));
       await this.save();
     } catch (error) {
-      console.error("Failed to parse memory:", error);
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`Failed to parse memory: ${message}`);
     }
   }
 }
 
 function parseMemoryOps(text: string): MemoryOp[] {
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start === -1 || end <= start) {
-    throw new Error("memory response has no JSON object");
-  }
-
-  const parsed: unknown = JSON.parse(text.slice(start, end + 1));
+  const parsed = lastOpsPayload(text);
   if (
     typeof parsed !== "object" ||
     parsed === null ||
@@ -126,6 +121,77 @@ function parseMemoryOps(text: string): MemoryOp[] {
     }
     return op;
   });
+}
+
+function lastOpsPayload(text: string): unknown {
+  const objects = jsonObjects(text.replace(/```(?:json)?/g, ""));
+  for (let index = objects.length - 1; index >= 0; index -= 1) {
+    try {
+      const parsed: unknown = JSON.parse(objects[index] ?? "");
+      if (hasOps(parsed)) {
+        return parsed;
+      }
+    } catch {
+      continue;
+    }
+  }
+  throw new Error("memory response has no JSON object");
+}
+
+function hasOps(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "ops" in value &&
+    Array.isArray(value.ops)
+  );
+}
+
+function jsonObjects(text: string): string[] {
+  const objects: string[] = [];
+  let start = -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === "{") {
+      if (depth === 0) {
+        start = index;
+      }
+      depth += 1;
+      continue;
+    }
+    if (char === "}" && depth > 0) {
+      depth -= 1;
+      if (depth === 0 && start !== -1) {
+        objects.push(text.slice(start, index + 1));
+        start = -1;
+      }
+    }
+  }
+
+  return objects;
 }
 
 function isMemoryList(value: unknown): value is MemoryItem[] {

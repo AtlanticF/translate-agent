@@ -125,6 +125,27 @@ test("extracts ops from the memory model and saves them", async () => {
   );
 });
 
+test("reads the ops object when the model adds text after it", async () => {
+  generateTextMock.mockResolvedValue({
+    text: [
+      "{",
+      '  "ops": [',
+      '    {"action":"add","index":-1,"text":"Use 您.","tags":["style"]}',
+      "  ]",
+      "}",
+      "用户把 {你好} 改成了 {您好}",
+    ].join("\n"),
+  } as unknown as Awaited<ReturnType<typeof generateText>>);
+  const { memory } = await tempMemory();
+  await memory.init();
+
+  await memory.extractMemory({ req: request, res: rejected });
+
+  expect(memory.current).toEqual([
+    { index: 0, text: "Use 您.", tags: ["style"] },
+  ]);
+});
+
 test("keeps the current list when the memory response is not JSON", async () => {
   generateTextMock.mockResolvedValue({
     text: "not json",

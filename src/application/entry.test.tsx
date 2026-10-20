@@ -5,6 +5,7 @@ import { expect, test } from "vitest";
 import type { AgentLoopNext } from "../agent/agent-loop.js";
 import type { CopilotRequest } from "../prompts/system.memory.js";
 import { App, submitCopilotReview, submitUserText, type AppSession } from "./entry.js";
+import { processingLabel } from "./transcript.js";
 import { inputPlaceholder } from "./user-screen.js";
 
 const request: CopilotRequest = {
@@ -17,7 +18,7 @@ const request: CopilotRequest = {
 test("shows a running state until the loop pauses", () => {
   const output = renderToString(<App start={() => new Promise(() => {})} />);
 
-  expect(output).toContain("正在准备");
+  expect(output).toContain(processingLabel);
 });
 
 test("shows the user screen when the loop waits for input", async () => {
@@ -39,7 +40,8 @@ test("shows the user screen when the loop waits for input", async () => {
     ready,
   );
 
-  expect(output).toContain("用户 翻译 README");
+  expect(output).toContain("user:");
+  expect(output).toContain("翻译 README");
   expect(output).toContain(inputPlaceholder);
 });
 
@@ -62,12 +64,11 @@ test("shows the copilot screen when a review is waiting", async () => {
     ready,
   );
 
-  expect(output).toContain("原文");
-  expect(output).toContain("译文");
   expect(output).toContain("hello");
   expect(output).toContain("你好");
-  expect(output).toContain("1/1");
-  expect(output).toContain("a");
+  expect(output).toContain("通过");
+  expect(output).toContain("剩余 1");
+  expect(output).not.toContain("原文");
 });
 
 test("shows a startup error", async () => {

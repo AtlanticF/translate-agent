@@ -2,23 +2,32 @@ import type { ModelMessage } from "ai";
 import { TextInput } from "@inkjs/ui";
 import { Box, Text } from "ink";
 import type { ReactElement } from "react";
+import { TranscriptView } from "./transcript-view.js";
 
 type UserScreenProps = {
   messages: readonly ModelMessage[];
   onSubmit: (text: string) => void;
 };
 
-export const appName = "translate-agent";
+export const welcomeTitle = "Welcome to Translator Agent!";
 
-// 用方块字符拼标志，终端里不需要图片。
-export const logo = ` ▝▜▙ 
-▗▟▀▀▘
- ▝▜▙ 
-▗▟▀▀▘`;
+export const welcomeDescription = [
+  "A powerful translation tool that drafts one paragraph at a time.",
+  "You approve, refine, or reject each draft before it is saved.",
+];
 
-export const welcome = "把目录或文件的绝对路径发给我。我会逐段翻译，每一段等你审核。";
+export const exampleHeading = "Here are some example prompts to get you started:";
 
-export const inputPlaceholder = "输入消息";
+export const examplePrompts = [
+  "Translate this text to Chinese: Hello, welcome aboard.",
+  "Help me translate this README into Chinese.",
+  "Translate /tmp/guide.md into English, one paragraph at a time.",
+  "Read the file, then keep product names in English.",
+];
+
+export const welcomeHint = "Type your message below to start translating! ✨";
+
+export const inputPlaceholder = "Type your prompt ...";
 
 // 输入框常带空白。去掉首尾空白后如果没有内容，就不提交。
 export function submittedUserText(text: string): string | undefined {
@@ -29,7 +38,7 @@ export function submittedUserText(text: string): string | undefined {
 export function UserScreen({ messages, onSubmit }: UserScreenProps): ReactElement {
   return (
     <Box flexDirection="column">
-      {messages.length === 0 ? <Welcome /> : <MessageList messages={messages} />}
+      {messages.length === 0 ? <Welcome /> : <TranscriptView messages={messages} />}
       <Box borderStyle="round" borderColor="cyan" paddingX={1} marginTop={1}>
         <TextInput
           placeholder={inputPlaceholder}
@@ -48,60 +57,28 @@ export function UserScreen({ messages, onSubmit }: UserScreenProps): ReactElemen
 function Welcome(): ReactElement {
   return (
     <Box flexDirection="column">
-      <Box>
-        <Text color="white">{logo}</Text>
-        <Box marginLeft={2}>
-          <Text color="white">{appName}</Text>
-        </Box>
-      </Box>
-      <Text color="white">{welcome}</Text>
-      <Text color="white">LS         列出目录</Text>
-      <Text color="white">Read       读取文件</Text>
-      <Text color="white">Translate  提交一段译文</Text>
-    </Box>
-  );
-}
-
-function MessageList({ messages }: { messages: readonly ModelMessage[] }): ReactElement {
-  return (
-    <Box flexDirection="column">
-      {messages.map((message, index) => (
-        <Text key={index}>
-          <Text dimColor>{roleLabel(message.role)} </Text>
-          {messageText(message)}
+      <Text bold color="cyan">
+        {welcomeTitle}
+      </Text>
+      {welcomeDescription.map((line) => (
+        <Text key={line} color="white">
+          {line}
         </Text>
       ))}
+      <Box flexDirection="column" marginTop={1}>
+        <Text dimColor>{exampleHeading}</Text>
+        {examplePrompts.map((prompt, index) => (
+          <Text key={prompt} dimColor>
+            {`  ${index + 1}. "${prompt}"`}
+          </Text>
+        ))}
+      </Box>
+      <Box marginTop={1}>
+        <Text dimColor italic>
+          {welcomeHint}
+        </Text>
+      </Box>
     </Box>
   );
 }
 
-function roleLabel(role: ModelMessage["role"]): string {
-  if (role === "user") {
-    return "用户";
-  }
-  if (role === "assistant") {
-    return "助手";
-  }
-  if (role === "tool") {
-    return "工具";
-  }
-  return "系统";
-}
-
-function messageText(message: ModelMessage): string {
-  if (typeof message.content === "string") {
-    return message.content;
-  }
-
-  return message.content
-    .map((part) => {
-      if ("text" in part && typeof part.text === "string") {
-        return part.text;
-      }
-      if ("toolName" in part && typeof part.toolName === "string") {
-        return part.toolName;
-      }
-      return part.type;
-    })
-    .join("\n");
-}
