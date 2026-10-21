@@ -31,21 +31,14 @@ import {
   TraceTitle,
 } from "@/components/ui/trace";
 import { inputPlaceholder, submittedUserText } from "../../shared/welcome";
-import type { CopilotRequest } from "../../src/prompts/system.memory";
+import type { ClientTurn, ClientTurnBody } from "../lib/client-loop";
+import { runTurns } from "../lib/client-loop";
 import { toolTitle, viewItems } from "../lib/view-items";
-
-type TurnBody = {
-  sessionId: string;
-  agentResponse: {
-    messages: ModelMessage[];
-    copilotRequests: CopilotRequest[];
-  };
-};
 
 export default function Home() {
   const [sessionId, setSessionId] = useState<string | undefined>();
   const [messages, setMessages] = useState<ModelMessage[]>([]);
-  const [requests, setRequests] = useState<CopilotRequest[]>([]);
+  const [requests, setRequests] = useState<ClientTurn["agentResponse"]["copilotRequests"]>([]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -68,12 +61,7 @@ export default function Home() {
     }
   }
 
-  async function reviewDone(response: {
-    status: "approve" | "reject" | "refined";
-    reason?: string;
-    refined_translated_string?: string;
-    tool: { callId: string };
-  }) {
+  async function reviewDone(response: NonNullable<ClientTurnBody["copilotResponses"]>[number]) {
     if (pending.current) {
       return;
     }
@@ -131,7 +119,14 @@ export default function Home() {
         )}
       </div>
       {error ? <p className="mx-auto w-full max-w-3xl px-4 text-sm text-destructive">{error}</p> : null}
-      {review ? <CopilotReview request={review} busy={busy} onSubmit={(response) => void reviewDone(response)} /> : null}
+      {review ? (
+        <CopilotReview
+          key={review.tool.callId}
+          request={review}
+          busy={busy}
+          onSubmit={(response) => void reviewDone(response)}
+        />
+      ) : null}
       <form
         className="mx-auto w-full max-w-3xl px-4 pb-4"
         onSubmit={(event) => {
@@ -163,37 +158,36 @@ export default function Home() {
     </div>
   );
 
-  async function turn(body: {
-    sessionId?: string;
-    userInput?: string;
-    copilotResponses?: Array<{
-      status: "approve" | "reject" | "refined";
-      reason?: string;
-      refined_translated_string?: string;
-      tool: { callId: string };
-    }>;
-  }) {
+  async function turn(body: ClientTurnBody) {
     setBusy(true);
     setError(undefined);
     try {
-      const response = await fetch("/next", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
+      await runTurns(postTurn, body, (step) => {
+        setSessionId(step.sessionId);
+        if (step.agentResponse.messages.length > 0) {
+          setMessages((current) => [...current, ...step.agentResponse.messages]);
+        }
+        setRequests(step.agentResponse.copilotRequests);
       });
-      const payload = (await response.json()) as TurnBody | { error: string };
-      if (!response.ok || !("agentResponse" in payload)) {
-        throw new Error("error" in payload ? payload.error : "request failed");
-      }
-      setSessionId(payload.sessionId);
-      setMessages((current) => [...current, ...payload.agentResponse.messages]);
-      setRequests(payload.agentResponse.copilotRequests);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setBusy(false);
     }
   }
+}
+
+async function postTurn(body: ClientTurnBody): Promise<ClientTurn> {
+  const response = await fetch("/next", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = (await response.json()) as ClientTurn | { error: string };
+  if (!response.ok || !("agentResponse" in payload)) {
+    throw new Error("error" in payload ? payload.error : "request failed");
+  }
+  return payload;
 }
 
 function ToolTrace({ item }: { item: Extract<ReturnType<typeof viewItems>[number], { kind: "tool" }> }) {

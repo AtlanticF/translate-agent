@@ -2,9 +2,8 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { ModelMessage, UserModelMessage } from "ai";
 import { tsImport } from "tsx/esm/api";
-import type { AgentLoopNext, CopilotHandler } from "../../src/agent/agent-loop";
+import type { AgentLoopNext } from "../../src/agent/agent-loop";
 import type { CopilotResponseEntry } from "../../src/messages/context";
-import type { CopilotRequest, CopilotResponse } from "../../src/prompts/system.memory";
 import { sessionManager as defaultSessions, type Session } from "./session-manager";
 
 const sessionModule = pathToFileURL(
@@ -34,9 +33,7 @@ type Sessions = {
 type TurnAgent = {
   userInput(messages: UserModelMessage[]): Promise<void>;
   addCopilotResponses(responses: readonly CopilotResponseEntry[]): void;
-  setCopilotHandler(handler: CopilotHandler): void;
   next(signal?: AbortSignal): Promise<AgentLoopNext>;
-  getMessages(): Promise<ModelMessage[]>;
 };
 
 export async function postNext(
@@ -66,53 +63,13 @@ export async function postNext(
     agent.addCopilotResponses(pendingResponses);
   }
 
-  const controller = new AbortController();
-  const stop = () => controller.abort();
-  signal?.addEventListener("abort", stop);
-
-  const copilot = Promise.withResolvers<{ kind: "copilot"; request: CopilotRequest }>();
-  agent.setCopilotHandler(async (copilotRequest) => {
-    const matched = pendingResponses.find(
-      (response) => response.tool.callId === copilotRequest.tool.callId,
-    );
-    if (matched) {
-      return matched;
-    }
-    copilot.resolve({ kind: "copilot", request: copilotRequest });
-    return waitUntilAbort(controller.signal);
-  });
-
-  const nextTurn = runUntilUser(agent, controller.signal);
-  const winner = await Promise.race([nextTurn, copilot.promise]);
-  signal?.removeEventListener("abort", stop);
-
-  if (winner.kind === "copilot") {
-    controller.abort();
-    const stored = sessions.getSession(session.id);
-    const extra = (await agent.getMessages()).slice(stored?.messages.length ?? 0);
-    if (extra.length > 0) {
-      sessions.addMessages(session.id, extra);
-    }
-    return {
-      status: 200,
-      body: {
-        sessionId: session.id,
-        agentResponse: {
-          messages: extra,
-          nextActor: "agent",
-          copilotRequests: [winner.request],
-          unprocessedToolCalls: [],
-        },
-      },
-    };
-  }
-
-  if (winner.agentResponse.messages.length > 0) {
-    sessions.addMessages(session.id, winner.agentResponse.messages);
+  const step = await agent.next(signal);
+  if (step.messages.length > 0) {
+    sessions.addMessages(session.id, step.messages);
   }
   return {
     status: 200,
-    body: { sessionId: session.id, agentResponse: winner.agentResponse },
+    body: { sessionId: session.id, agentResponse: step },
   };
 }
 
@@ -121,45 +78,4 @@ async function openLoop(messages: readonly ModelMessage[]): Promise<TurnAgent> {
     createLoop(messages: readonly ModelMessage[]): Promise<TurnAgent>;
   };
   return session.createLoop(messages);
-}
-
-async function runUntilUser(
-  agent: TurnAgent,
-  signal: AbortSignal,
-): Promise<{ kind: "next"; agentResponse: AgentLoopNext }> {
-  const produced: ModelMessage[] = [];
-  let last: AgentLoopNext = {
-    nextActor: "user",
-    unprocessedToolCalls: [],
-    copilotRequests: [],
-    messages: [],
-  };
-
-  for (;;) {
-    if (signal.aborted) {
-      break;
-    }
-    const step = await agent.next(signal);
-    if (signal.aborted) {
-      break;
-    }
-    produced.push(...step.messages);
-    last = { ...step, messages: [...produced] };
-    if (step.nextActor === "user") {
-      break;
-    }
-  }
-
-  return { kind: "next", agentResponse: last };
-}
-
-function waitUntilAbort(signal: AbortSignal): Promise<CopilotResponse> {
-  return new Promise((_resolve, reject) => {
-    const abort = () => reject(new DOMException("aborted", "AbortError"));
-    if (signal.aborted) {
-      abort();
-      return;
-    }
-    signal.addEventListener("abort", abort, { once: true });
-  });
 }

@@ -67,34 +67,26 @@ test("restores a session and saves the finished step", async () => {
   ]);
 });
 
-test("returns a copilot request before the step finishes", async () => {
+test("returns a single step, even when the agent still has work", async () => {
   const sessions = createSessionManager();
-  let release = () => {};
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
+  let calls = 0;
 
   const result = await postNext({}, undefined, sessions, async () => ({
     async userInput() {},
     addCopilotResponses() {},
-    setCopilotHandler(handler) {
-      void handler(request).catch(() => {});
-    },
     async next() {
-      await gate;
+      calls += 1;
       const step: AgentLoopNext = {
-        nextActor: "user",
-        messages: [{ role: "assistant", content: "late" }],
-        copilotRequests: [],
+        nextActor: "agent",
+        messages: [{ role: "assistant", content: "draft" }],
+        copilotRequests: [request],
         unprocessedToolCalls: [],
       };
       return step;
     },
-    async getMessages() {
-      return [{ role: "assistant", content: "draft" }];
-    },
   }));
 
+  expect(calls).toBe(1);
   expect(result.status).toBe(200);
   expect(result.body).toMatchObject({
     agentResponse: {
@@ -107,7 +99,4 @@ test("returns a copilot request before the step finishes", async () => {
   expect(sessions.getSession(sessionId)?.messages).toEqual([
     { role: "assistant", content: "draft" },
   ]);
-
-  release();
-  await gate;
 });
