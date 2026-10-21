@@ -6,6 +6,7 @@ const nextConfig: NextConfig = {
   /* config options here */
   cacheComponents: true,
   partialPrefetching: true,
+  serverExternalPackages: ["tsx"],
   turbopack: {
     root: path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
     rules: {

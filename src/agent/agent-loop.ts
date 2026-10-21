@@ -10,7 +10,7 @@ import {
 } from "ai";
 import { models } from "../ai/llm.js";
 import type { MemorySource } from "../memory/memory.js";
-import type { Context, CopilotResponseEntry } from "../messages/context.js";
+import { Context, type CopilotResponseEntry } from "../messages/context.js";
 import type { CopilotRequest, CopilotResponse } from "../prompts/system.memory.js";
 import { SYSTEM_WORKFLOW } from "../prompts/system.workflow.js";
 import type { ToolExecutor } from "../tools/executor.js";
@@ -38,19 +38,35 @@ type NextStep = {
 
 type ToolExecution =
   | { type: "tool-result-part"; payload: ToolResultPart }
-  | { type: "copilot-request"; payload: CopilotRequest };
+  | { type: "copilot-request"; payload: CopilotRequest }
+  | { type: "aborted" };
 
-// 无状态的一步循环。应用调用 next() 推进，消息和协同结果都放在 context。
+export type CopilotHandler = (request: CopilotRequest) => Promise<CopilotResponse>;
+
+// 无状态的一步循环。用已有 messages 构造即可恢复。协同结果仍放在这一轮的 context 里。
 export class AgentLoop {
+  private readonly context: Context;
+  private copilotHandler?: CopilotHandler;
+
   constructor(
     private readonly toolsDef: ToolSet,
     private readonly toolsExecutor: Record<string, ToolExecutor>,
-    private readonly context: Context,
+    source: Context | readonly ModelMessage[] = [],
     private readonly options: AgentLoopOptions = {},
-  ) {}
+  ) {
+    this.context = source instanceof Context ? source : new Context(source);
+  }
 
   async userInput(messages: UserModelMessage[]): Promise<void> {
     this.context.addMessages(messages);
+  }
+
+  addCopilotResponses(responses: readonly CopilotResponseEntry[]): void {
+    this.context.addCopilotResponses(responses);
+  }
+
+  setCopilotHandler(handler: CopilotHandler): void {
+    this.copilotHandler = handler;
   }
 
   async getMessages(): Promise<ModelMessage[]> {
@@ -90,7 +106,7 @@ export class AgentLoop {
       return this.askModel(signal);
     }
 
-    return this.runTools(pending);
+    return this.runTools(pending, signal);
   }
 
   private getUnprocessedToolCalls(): ToolCallPart[] {
@@ -171,6 +187,7 @@ export class AgentLoop {
 
   private async runTools(
     unprocessedToolCalls: readonly ToolCallPart[],
+    signal?: AbortSignal,
   ): Promise<NextStep> {
     const copilotResponseMap = this.context
       .getCopilotResponses(unprocessedToolCalls.map((call) => call.toolCallId))
@@ -185,13 +202,20 @@ export class AgentLoop {
 
     const toolResults = await Promise.all(
       unprocessedToolCalls.map((call) =>
-        this.executeTool(call, copilotResponseMap[call.toolCallId]),
+        this.executeTool(call, copilotResponseMap[call.toolCallId], signal),
       ),
     );
+
+    if (toolResults.some((executed) => executed.type === "aborted")) {
+      return { messages: [], actor: "user", copilotRequests: [] };
+    }
 
     const results: ToolResultPart[] = [];
     const copilotRequests: CopilotRequest[] = [];
     for (const executed of toolResults) {
+      if (executed.type === "aborted") {
+        continue;
+      }
       if (executed.type === "tool-result-part") {
         results.push(executed.payload);
       } else {
@@ -211,6 +235,7 @@ export class AgentLoop {
   private async executeTool(
     part: ToolCallPart,
     copilotResponse?: CopilotResponse,
+    signal?: AbortSignal,
   ): Promise<ToolExecution> {
     const input = part.input;
     const executor = this.toolsExecutor[part.toolName];
@@ -228,7 +253,18 @@ export class AgentLoop {
       const result = await executor(input, options, copilotResponse);
 
       if (result.type === "copilot-request") {
-        return result;
+        if (!this.copilotHandler || copilotResponse) {
+          return result;
+        }
+        try {
+          const response = await this.copilotHandler(result.payload);
+          return this.executeTool(part, response, signal);
+        } catch (error) {
+          if (signal?.aborted) {
+            return { type: "aborted" };
+          }
+          throw error;
+        }
       }
 
       return {

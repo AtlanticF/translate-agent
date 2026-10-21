@@ -1,3 +1,13 @@
-export function GET() {
-  return Response.json({ text: "Hello from /next" });
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { loadEnvFile } from "../../../src/env";
+import { postNext, type NextTurnRequest } from "../../lib/next-turn";
+
+const envPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../.env");
+
+export async function POST(request: Request) {
+  loadEnvFile(envPath);
+  const body = (await request.json()) as NextTurnRequest;
+  const result = await postNext(body, request.signal);
+  return Response.json(result.body, { status: result.status });
 }

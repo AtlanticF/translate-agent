@@ -1,4 +1,5 @@
 import { writeFile } from "node:fs/promises";
+import type { ModelMessage } from "ai";
 import { AgentLoop } from "../agent/agent-loop.js";
 import { Context } from "../messages/context.js";
 import { Memory } from "../memory/memory.js";
@@ -31,6 +32,25 @@ export async function createSession(): Promise<{
   );
 
   return { loop, context, memory };
+}
+
+export async function createLoop(messages: readonly ModelMessage[] = []): Promise<AgentLoop> {
+  const memory = new Memory();
+  await memory.init();
+  return new AgentLoop(
+    {
+      LS: lsTool,
+      Read: readTool,
+      Translate: translateTool,
+    },
+    {
+      LS: lsExecutor,
+      Read: readExecutor,
+      Translate: createTranslateExecutor({ writer: writeTranslation }),
+    },
+    messages,
+    { memory },
+  );
 }
 
 async function writeTranslation({

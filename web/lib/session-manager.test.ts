@@ -26,6 +26,16 @@ test("appends messages and keeps the stored list unchanged by callers", () => {
   expect(manager.getSession(session.id)?.messages).toEqual([message]);
 });
 
+test("stores copilot responses on the session", () => {
+  const manager = createSessionManager();
+  const session = manager.createSession();
+  const response = { status: "approve" as const, tool: { callId: "call-1" } };
+
+  manager.addCopilotResponses(session.id, [response]);
+
+  expect(manager.getSession(session.id)?.copilotResponses).toEqual([response]);
+});
+
 test("throws when adding messages to an unknown session", () => {
   const manager = createSessionManager();
 

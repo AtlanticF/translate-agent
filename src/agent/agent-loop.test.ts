@@ -26,6 +26,13 @@ beforeEach(() => {
   generateTextMock.mockReset();
 });
 
+test("restores the loop from messages", async () => {
+  const messages = [{ role: "user" as const, content: "hello" }];
+  const loop = new AgentLoop({}, {}, messages);
+
+  await expect(loop.getMessages()).resolves.toEqual(messages);
+});
+
 test("asks the user when the context is empty", async () => {
   const context = new Context();
   const loop = new AgentLoop({}, {}, context);
@@ -273,6 +280,114 @@ test("passes the stored copilot response into the pending tool", async () => {
     { name: "Translate", callId: "call-1" },
     response,
   );
+});
+
+test("continues a tool when the copilot handler returns a review", async () => {
+  const request: CopilotRequest = {
+    src_string: "hello",
+    translate_string: "你好",
+    file_path: "/tmp/readme",
+    tool: { name: "Translate", callId: "call-1" },
+  };
+  const executor = vi.fn<ToolExecutor>(async (_input, _options, response) => {
+    if (!response) {
+      return { type: "copilot-request", payload: request };
+    }
+    return { type: "json", payload: { status: "approve" } };
+  });
+  const loop = new AgentLoop(
+    {},
+    { Translate: executor },
+    [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call-1",
+            toolName: "Translate",
+            input: { text: "hello" },
+          },
+        ],
+      },
+    ],
+  );
+  loop.setCopilotHandler(async () => ({ status: "approve" }));
+
+  const result = await loop.next();
+
+  expect(executor).toHaveBeenCalledTimes(2);
+  expect(result.copilotRequests).toEqual([]);
+  expect(result.messages).toEqual([
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "call-1",
+          toolName: "Translate",
+          output: { type: "json", value: { status: "approve" } },
+        },
+      ],
+    },
+  ]);
+});
+
+test("stops the tool step when a waiting review is aborted", async () => {
+  const executor = vi.fn<ToolExecutor>(async () => ({
+    type: "copilot-request",
+    payload: {
+      src_string: "hello",
+      translate_string: "你好",
+      file_path: "/tmp/readme",
+      tool: { name: "Translate", callId: "call-1" },
+    },
+  }));
+  const loop = new AgentLoop(
+    {},
+    { Translate: executor },
+    [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call-1",
+            toolName: "Translate",
+            input: { text: "hello" },
+          },
+        ],
+      },
+    ],
+  );
+  const controller = new AbortController();
+  loop.setCopilotHandler(
+    () =>
+      new Promise((_resolve, reject) => {
+        controller.signal.addEventListener("abort", () => {
+          reject(new DOMException("aborted", "AbortError"));
+        });
+        controller.abort();
+      }),
+  );
+
+  const result = await loop.next(controller.signal);
+
+  expect(result.messages).toEqual([]);
+  expect(result.copilotRequests).toEqual([]);
+  await expect(loop.getMessages()).resolves.toEqual([
+    {
+      role: "assistant",
+      content: [
+        {
+          type: "tool-call",
+          toolCallId: "call-1",
+          toolName: "Translate",
+          input: { text: "hello" },
+        },
+      ],
+    },
+  ]);
 });
 
 test("keeps the agent when a tool asks for review", async () => {
