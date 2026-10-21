@@ -7,7 +7,7 @@ const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
   turbopack: {
-    root: path.dirname(fileURLToPath(import.meta.url)),
+    root: path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
     rules: {
       "*.css": {
         loaders: ["@tailwindcss/turbopack"],
