@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "node scripts/bundle-agent.mjs && next dev",
-    "build": "node scripts/bundle-agent.mjs && next build",
+    "build": "node scripts/opennext.mjs build",
     "start": "next start",
     "preview": "node scripts/opennext.mjs build && node scripts/opennext.mjs preview",
     "deploy": "node scripts/opennext.mjs build && node scripts/opennext.mjs deploy",
