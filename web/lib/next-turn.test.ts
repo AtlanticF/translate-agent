@@ -1,11 +1,8 @@
-import { expect, test, vi } from "vitest";
-
-vi.mock("server-only", () => ({}));
-
+import { expect, test } from "vitest";
 import type { AgentLoopNext } from "../../src/agent/agent-loop";
 import type { CopilotRequest } from "../../src/prompts/system.memory";
 import { postNext } from "./next-turn";
-import { createSessionManager } from "./session-manager";
+import { createSqliteSessionStore } from "./session-sqlite";
 
 const request: CopilotRequest = {
   src_string: "hello",
@@ -15,7 +12,7 @@ const request: CopilotRequest = {
 };
 
 test("returns 404 when the session id is unknown", async () => {
-  const sessions = createSessionManager();
+  const sessions = createSqliteSessionStore();
 
   const result = await postNext({ sessionId: "missing" }, undefined, sessions, async () => {
     throw new Error("should not open an agent");
@@ -25,9 +22,9 @@ test("returns 404 when the session id is unknown", async () => {
 });
 
 test("restores a session and saves the finished step", async () => {
-  const sessions = createSessionManager();
-  const created = sessions.createSession();
-  sessions.addMessages(created.id, [{ role: "user", content: "earlier" }]);
+  const sessions = createSqliteSessionStore();
+  const created = await sessions.create();
+  await sessions.update(created.id, { messages: [{ role: "user", content: "earlier" }] });
 
   const result = await postNext(
     { sessionId: created.id, userInput: "hello" },
@@ -59,7 +56,7 @@ test("restores a session and saves the finished step", async () => {
   );
 
   expect(result.status).toBe(200);
-  expect(sessions.getSession(created.id)?.messages).toEqual([
+  expect((await sessions.get(created.id))?.messages).toEqual([
     { role: "user", content: "earlier" },
     { role: "user", content: "hello" },
     { role: "assistant", content: "done" },
@@ -67,7 +64,7 @@ test("restores a session and saves the finished step", async () => {
 });
 
 test("returns a single step, even when the agent still has work", async () => {
-  const sessions = createSessionManager();
+  const sessions = createSqliteSessionStore();
   let calls = 0;
 
   const result = await postNext({}, undefined, sessions, async () => ({
@@ -95,7 +92,5 @@ test("returns a single step, even when the agent still has work", async () => {
     },
   });
   const sessionId = "sessionId" in result.body ? result.body.sessionId : "";
-  expect(sessions.getSession(sessionId)?.messages).toEqual([
-    { role: "assistant", content: "draft" },
-  ]);
+  expect((await sessions.get(sessionId))?.messages).toEqual([{ role: "assistant", content: "draft" }]);
 });

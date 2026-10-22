@@ -1,14 +1,7 @@
-import path from "node:path";
-import { pathToFileURL } from "node:url";
 import type { ModelMessage, UserModelMessage } from "ai";
-import { tsImport } from "tsx/esm/api";
 import type { AgentLoopNext } from "../../src/agent/agent-loop";
 import type { CopilotResponseEntry } from "../../src/messages/context";
-import { sessionManager as defaultSessions, type Session } from "./session-manager";
-
-const sessionModule = pathToFileURL(
-  path.resolve(process.cwd(), "../src/application/session.ts"),
-).href;
+import type { SessionStore } from "./session";
 
 export type NextTurnRequest = {
   sessionId?: string;
@@ -23,13 +16,6 @@ export type NextTurnResponse = {
     | { error: string };
 };
 
-type Sessions = {
-  createSession(): Session;
-  getSession(id: string): Session | undefined;
-  addMessages(id: string, messages: readonly ModelMessage[]): Session;
-  addCopilotResponses(id: string, responses: readonly CopilotResponseEntry[]): Session;
-};
-
 type TurnAgent = {
   userInput(messages: UserModelMessage[]): Promise<void>;
   addCopilotResponses(responses: readonly CopilotResponseEntry[]): void;
@@ -38,13 +24,11 @@ type TurnAgent = {
 
 export async function postNext(
   request: NextTurnRequest,
-  signal?: AbortSignal,
-  sessions: Sessions = defaultSessions,
+  signal: AbortSignal | undefined,
+  sessions: SessionStore,
   openAgent: (messages: readonly ModelMessage[]) => Promise<TurnAgent> = openLoop,
 ): Promise<NextTurnResponse> {
-  const session = request.sessionId
-    ? sessions.getSession(request.sessionId)
-    : sessions.createSession();
+  let session = request.sessionId ? await sessions.get(request.sessionId) : await sessions.create();
   if (!session) {
     return { status: 404, body: { error: "session not found" } };
   }
@@ -53,19 +37,25 @@ export async function postNext(
   const userInput = request.userInput?.trim();
   if (userInput) {
     const messages: UserModelMessage[] = [{ role: "user", content: userInput }];
-    sessions.addMessages(session.id, messages);
+    session = await sessions.update(session.id, {
+      messages: [...session.messages, ...messages],
+    });
     await agent.userInput(messages);
   }
 
   const pendingResponses = request.copilotResponses ?? [];
   if (pendingResponses.length > 0) {
-    sessions.addCopilotResponses(session.id, pendingResponses);
+    session = await sessions.update(session.id, {
+      copilotResponses: [...session.copilotResponses, ...pendingResponses],
+    });
     agent.addCopilotResponses(pendingResponses);
   }
 
   const step = await agent.next(signal);
   if (step.messages.length > 0) {
-    sessions.addMessages(session.id, step.messages);
+    await sessions.update(session.id, {
+      messages: [...session.messages, ...step.messages],
+    });
   }
   return {
     status: 200,
@@ -74,8 +64,6 @@ export async function postNext(
 }
 
 async function openLoop(messages: readonly ModelMessage[]): Promise<TurnAgent> {
-  const session = (await tsImport(sessionModule, import.meta.url)) as {
-    createLoop(messages: readonly ModelMessage[]): Promise<TurnAgent>;
-  };
+  const session = await import("./agent-session.js");
   return session.createLoop(messages);
 }
