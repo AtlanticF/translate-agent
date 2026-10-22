@@ -38,15 +38,11 @@ type NextStep = {
 
 type ToolExecution =
   | { type: "tool-result-part"; payload: ToolResultPart }
-  | { type: "copilot-request"; payload: CopilotRequest }
-  | { type: "aborted" };
-
-export type CopilotHandler = (request: CopilotRequest) => Promise<CopilotResponse>;
+  | { type: "copilot-request"; payload: CopilotRequest };
 
 // 无状态的一步循环。用已有 messages 构造即可恢复。协同结果仍放在这一轮的 context 里。
 export class AgentLoop {
   private readonly context: Context;
-  private copilotHandler?: CopilotHandler;
 
   constructor(
     private readonly toolsDef: ToolSet,
@@ -63,10 +59,6 @@ export class AgentLoop {
 
   addCopilotResponses(responses: readonly CopilotResponseEntry[]): void {
     this.context.addCopilotResponses(responses);
-  }
-
-  setCopilotHandler(handler: CopilotHandler): void {
-    this.copilotHandler = handler;
   }
 
   async getMessages(): Promise<ModelMessage[]> {
@@ -106,7 +98,7 @@ export class AgentLoop {
       return this.askModel(signal);
     }
 
-    return this.runTools(pending, signal);
+    return this.runTools(pending);
   }
 
   private getUnprocessedToolCalls(): ToolCallPart[] {
@@ -185,10 +177,7 @@ export class AgentLoop {
     };
   }
 
-  private async runTools(
-    unprocessedToolCalls: readonly ToolCallPart[],
-    signal?: AbortSignal,
-  ): Promise<NextStep> {
+  private async runTools(unprocessedToolCalls: readonly ToolCallPart[]): Promise<NextStep> {
     const copilotResponseMap = this.context
       .getCopilotResponses(unprocessedToolCalls.map((call) => call.toolCallId))
       .reduce(
@@ -201,21 +190,12 @@ export class AgentLoop {
       );
 
     const toolResults = await Promise.all(
-      unprocessedToolCalls.map((call) =>
-        this.executeTool(call, copilotResponseMap[call.toolCallId], signal),
-      ),
+      unprocessedToolCalls.map((call) => this.executeTool(call, copilotResponseMap[call.toolCallId])),
     );
-
-    if (toolResults.some((executed) => executed.type === "aborted")) {
-      return { messages: [], actor: "user", copilotRequests: [] };
-    }
 
     const results: ToolResultPart[] = [];
     const copilotRequests: CopilotRequest[] = [];
     for (const executed of toolResults) {
-      if (executed.type === "aborted") {
-        continue;
-      }
       if (executed.type === "tool-result-part") {
         results.push(executed.payload);
       } else {
@@ -235,7 +215,6 @@ export class AgentLoop {
   private async executeTool(
     part: ToolCallPart,
     copilotResponse?: CopilotResponse,
-    signal?: AbortSignal,
   ): Promise<ToolExecution> {
     const input = part.input;
     const executor = this.toolsExecutor[part.toolName];
@@ -253,18 +232,7 @@ export class AgentLoop {
       const result = await executor(input, options, copilotResponse);
 
       if (result.type === "copilot-request") {
-        if (!this.copilotHandler || copilotResponse) {
-          return result;
-        }
-        try {
-          const response = await this.copilotHandler(result.payload);
-          return this.executeTool(part, response, signal);
-        } catch (error) {
-          if (signal?.aborted) {
-            return { type: "aborted" };
-          }
-          throw error;
-        }
+        return result;
       }
 
       return {

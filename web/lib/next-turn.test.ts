@@ -40,7 +40,6 @@ test("restores a session and saves the finished step", async () => {
           stored.push(...next);
         },
         addCopilotResponses() {},
-        setCopilotHandler() {},
         async next() {
           const message = { role: "assistant" as const, content: "done" };
           stored.push(message);
