@@ -17,6 +17,7 @@ export type ClientTurn = {
 };
 
 // 一步 HTTP 对应一次 next()。工具调用、工具结果、模型回复各刷一次，遇到审核或该用户说话时停下。
+// 同一步返回的多条审核一起停住，由调用方集齐 copilotResponses 再继续。
 export async function runTurns(
   post: (body: ClientTurnBody) => Promise<ClientTurn>,
   initial: ClientTurnBody,

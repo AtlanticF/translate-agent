@@ -2,22 +2,20 @@
 
 import { useState } from "react";
 import type { CopilotRequest } from "../../src/prompts/system.memory";
+import type { CopilotReviewResponse } from "../lib/copilot-batch";
 import { Button } from "@/components/ui/button";
 import { InputGroup, InputGroupTextarea } from "@/components/ui/input-group";
-
-type ReviewResponse =
-  | { status: "approve"; tool: { callId: string } }
-  | { status: "reject"; reason: string; tool: { callId: string } }
-  | { status: "refined"; refined_translated_string: string; tool: { callId: string } };
 
 export function CopilotReview({
   request,
   busy,
+  decision,
   onSubmit,
 }: {
   request: CopilotRequest;
   busy: boolean;
-  onSubmit: (response: ReviewResponse) => void;
+  decision?: CopilotReviewResponse;
+  onSubmit: (response: CopilotReviewResponse) => void;
 }) {
   const [mode, setMode] = useState<"choose" | "reject" | "refine">("choose");
   const [draft, setDraft] = useState("");
@@ -29,7 +27,9 @@ export function CopilotReview({
         <p className="mt-2 whitespace-pre-wrap">{request.src_string}</p>
         <p className="mt-2 whitespace-pre-wrap text-muted-foreground">{request.translate_string}</p>
       </div>
-      {mode === "choose" ? (
+      {decision ? (
+        <p className="text-sm whitespace-pre-wrap text-muted-foreground">{decisionLabel(decision)}</p>
+      ) : mode === "choose" ? (
         <div className="flex gap-2">
           <Button
             type="button"
@@ -90,4 +90,14 @@ export function CopilotReview({
     setDraft(next === "refine" ? request.translate_string : "");
     setMode(next);
   }
+}
+
+function decisionLabel(decision: CopilotReviewResponse): string {
+  if (decision.status === "approve") {
+    return "已通过";
+  }
+  if (decision.status === "reject") {
+    return `已拒绝：${decision.reason}`;
+  }
+  return `已修改：${decision.refined_translated_string}`;
 }
