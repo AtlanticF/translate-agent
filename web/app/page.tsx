@@ -31,6 +31,8 @@ import {
   TraceTitle,
 } from "@/components/ui/trace";
 import { inputPlaceholder, submittedUserText } from "../../shared/welcome";
+import type { CopilotReviewResponse } from "../lib/copilot-batch";
+import { noteCopilotDecision } from "../lib/copilot-batch";
 import type { ClientTurn, ClientTurnBody } from "../lib/client-loop";
 import { runTurns } from "../lib/client-loop";
 import { toolTitle, viewItems } from "../lib/view-items";
@@ -39,16 +41,20 @@ export default function Home() {
   const [sessionId, setSessionId] = useState<string | undefined>();
   const [messages, setMessages] = useState<ModelMessage[]>([]);
   const [requests, setRequests] = useState<ClientTurn["agentResponse"]["copilotRequests"]>([]);
+  const [decisions, setDecisions] = useState<Record<string, CopilotReviewResponse>>({});
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const pending = useRef(false);
+  const requestsRef = useRef(requests);
+  const decisionsRef = useRef(decisions);
   const items = viewItems(messages);
-  const review = requests[0];
+  const reviewing = requests.length > 0;
+  const decidedCount = requests.filter((request) => decisions[request.tool.callId]).length;
 
   async function send() {
     const text = submittedUserText(draft);
-    if (!text || pending.current || review) {
+    if (!text || pending.current || requestsRef.current.length > 0) {
       return;
     }
     pending.current = true;
@@ -61,13 +67,28 @@ export default function Home() {
     }
   }
 
-  async function reviewDone(response: NonNullable<ClientTurnBody["copilotResponses"]>[number]) {
+  function decide(response: CopilotReviewResponse) {
+    if (pending.current) {
+      return;
+    }
+    const noted = noteCopilotDecision(requestsRef.current, decisionsRef.current, response);
+    if (noted.decisions === decisionsRef.current) {
+      return;
+    }
+    decisionsRef.current = noted.decisions;
+    setDecisions(noted.decisions);
+    if (noted.ready) {
+      void reviewDone(noted.ready);
+    }
+  }
+
+  async function reviewDone(responses: CopilotReviewResponse[]) {
     if (pending.current) {
       return;
     }
     pending.current = true;
     try {
-      await turn({ sessionId, copilotResponses: [response] });
+      await turn({ sessionId, copilotResponses: responses });
     } finally {
       pending.current = false;
     }
@@ -119,13 +140,23 @@ export default function Home() {
         )}
       </div>
       {error ? <p className="mx-auto w-full max-w-3xl px-4 text-sm text-destructive">{error}</p> : null}
-      {review ? (
-        <CopilotReview
-          key={review.tool.callId}
-          request={review}
-          busy={busy}
-          onSubmit={(response) => void reviewDone(response)}
-        />
+      {reviewing ? (
+        <div className="max-h-[50dvh] overflow-y-auto">
+          {requests.length > 1 ? (
+            <p className="mx-auto w-full max-w-3xl px-4 text-sm text-muted-foreground">
+              {decidedCount}/{requests.length} 已审核
+            </p>
+          ) : null}
+          {requests.map((request) => (
+            <CopilotReview
+              key={request.tool.callId}
+              request={request}
+              busy={busy}
+              decision={decisions[request.tool.callId]}
+              onSubmit={decide}
+            />
+          ))}
+        </div>
       ) : null}
       <form
         className="mx-auto w-full max-w-3xl px-4 pb-4"
@@ -139,7 +170,7 @@ export default function Home() {
             value={draft}
             placeholder={inputPlaceholder}
             rows={1}
-            disabled={busy || Boolean(review)}
+            disabled={busy || reviewing}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
@@ -149,7 +180,7 @@ export default function Home() {
             }}
           />
           <InputGroupAddon align="block-end" className="justify-end">
-            <InputGroupButton type="submit" size="sm" disabled={busy || Boolean(review)}>
+            <InputGroupButton type="submit" size="sm" disabled={busy || reviewing}>
               Send
             </InputGroupButton>
           </InputGroupAddon>
@@ -167,7 +198,11 @@ export default function Home() {
         if (step.agentResponse.messages.length > 0) {
           setMessages((current) => [...current, ...step.agentResponse.messages]);
         }
-        setRequests(step.agentResponse.copilotRequests);
+        const nextRequests = step.agentResponse.copilotRequests;
+        requestsRef.current = nextRequests;
+        decisionsRef.current = {};
+        setRequests(nextRequests);
+        setDecisions({});
       });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));

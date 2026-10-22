@@ -63,6 +63,33 @@ test("renders each step and continues with only the session id", async () => {
   expect(seen).toEqual(["calling read", "read result", "done"]);
 });
 
+test("stops when one step returns several reviews", async () => {
+  const second = {
+    ...request,
+    src_string: "world",
+    tool: { name: "Translate", callId: "call-2" },
+  };
+  let calls = 0;
+
+  await runTurns(
+    async () => {
+      calls += 1;
+      return {
+        sessionId: "s1",
+        agentResponse: {
+          messages: [],
+          nextActor: "agent" as const,
+          copilotRequests: [request, second],
+        },
+      };
+    },
+    { userInput: "hi" },
+    () => {},
+  );
+
+  expect(calls).toBe(1);
+});
+
 test("stops when a step asks for review", async () => {
   let calls = 0;
 
