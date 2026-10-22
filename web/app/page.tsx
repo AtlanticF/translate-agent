@@ -1,9 +1,10 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ModelMessage } from "ai";
 import { TerminalIcon } from "lucide-react";
 import { CopilotReview } from "@/components/copilot-review";
+import { SessionSidebar } from "@/components/session-sidebar";
 import { Welcome } from "@/components/welcome";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { CodeBlock, CodeBlockContent } from "@/components/ui/code-block";
@@ -36,8 +37,10 @@ import { noteCopilotDecision } from "../lib/copilot-batch";
 import type { ClientTurn, ClientTurnBody } from "../lib/client-loop";
 import { runTurns } from "../lib/client-loop";
 import { toolTitle, viewItems } from "../lib/view-items";
+import type { SessionSummary } from "../lib/session-title";
 
 export default function Home() {
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [sessionId, setSessionId] = useState<string | undefined>();
   const [messages, setMessages] = useState<ModelMessage[]>([]);
   const [requests, setRequests] = useState<ClientTurn["agentResponse"]["copilotRequests"]>([]);
@@ -51,6 +54,50 @@ export default function Home() {
   const items = viewItems(messages);
   const reviewing = requests.length > 0;
   const decidedCount = requests.filter((request) => decisions[request.tool.callId]).length;
+
+  useEffect(() => {
+    void loadSessions();
+  }, []);
+
+  function newSession() {
+    if (pending.current) {
+      return;
+    }
+    setSessionId(undefined);
+    setMessages([]);
+    requestsRef.current = [];
+    decisionsRef.current = {};
+    setRequests([]);
+    setDecisions({});
+    setDraft("");
+    setError(undefined);
+  }
+
+  async function openSession(id: string) {
+    if (pending.current || id === sessionId) {
+      return;
+    }
+    pending.current = true;
+    setError(undefined);
+    try {
+      const response = await fetch(`/sessions/${id}`);
+      const payload = (await response.json()) as { id: string; messages: ModelMessage[] } | { error: string };
+      if (!response.ok || !("messages" in payload)) {
+        throw new Error("error" in payload ? payload.error : "request failed");
+      }
+      setSessionId(payload.id);
+      setMessages(payload.messages);
+      requestsRef.current = [];
+      decisionsRef.current = {};
+      setRequests([]);
+      setDecisions({});
+      setDraft("");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      pending.current = false;
+    }
+  }
 
   async function send() {
     const text = submittedUserText(draft);
@@ -95,7 +142,15 @@ export default function Home() {
   }
 
   return (
-    <div className="flex h-dvh flex-col">
+    <div className="flex h-dvh">
+      <SessionSidebar
+        sessions={sessions}
+        currentId={sessionId}
+        disabled={busy}
+        onNew={newSession}
+        onSelect={(id) => void openSession(id)}
+      />
+      <div className="flex min-w-0 flex-1 flex-col">
       <div className="min-h-0 flex-1">
         {items.length === 0 && !busy ? (
           <Welcome />
@@ -186,6 +241,7 @@ export default function Home() {
           </InputGroupAddon>
         </InputGroup>
       </form>
+      </div>
     </div>
   );
 
@@ -208,6 +264,20 @@ export default function Home() {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setBusy(false);
+      void loadSessions();
+    }
+  }
+
+  async function loadSessions() {
+    try {
+      const response = await fetch("/sessions");
+      const payload = (await response.json()) as { sessions: SessionSummary[] } | { error: string };
+      if (!response.ok || !("sessions" in payload)) {
+        throw new Error("error" in payload ? payload.error : "request failed");
+      }
+      setSessions(payload.sessions);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
     }
   }
 }

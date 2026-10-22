@@ -1,0 +1,39 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "translate-agent-web",
+	"main": ".open-next/worker.js",
+	"compatibility_date": "2026-10-22",
+	"compatibility_flags": [
+		"nodejs_compat",
+		"global_fetch_strictly_public"
+	],
+	"assets": {
+		"directory": ".open-next/assets",
+		"binding": "ASSETS"
+	},
+	"services": [
+		{
+			"binding": "WORKER_SELF_REFERENCE",
+			"service": "translate-agent-web"
+		}
+	],
+	"observability": {
+		"enabled": true,
+		"traces": {
+			"enabled": true
+		}
+	},
+	"vars": {
+		"TRANSLATOR_MODEL": "z-ai/glm-4.5",
+		"MEMORY_MODEL": "qwen/qwen3.5-flash-02-23",
+		"COMPACT_MODEL": "qwen/qwen3.5-flash-02-23"
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "translate-agent",
+			"database_id": "c13f8bc8-693f-400a-9423-78ab1776284d",
+			"migrations_dir": "drizzle"
+		}
+	]
+}

@@ -1,4 +1,10 @@
 node_modules/
+.next/
+web/web/
+.open-next/
+web/lib/agent-session.js
+package-lock.json.opennext
+.wrangler/
 memory.json
 .model-cache.json
 dist/
