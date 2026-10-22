@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/application/entry.tsx",
-    "build": "npm run build --prefix web",
+    "build": "test -x web/node_modules/.bin/opennextjs-cloudflare || npm ci --prefix web && npm run build --prefix web",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

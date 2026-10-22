@@ -17,7 +17,12 @@ try {
     process.argv.slice(2),
     { stdio: "inherit", cwd: appDir },
   );
-  process.exitCode = result.status ?? 1;
+  if (result.error) {
+    console.error(result.error);
+    process.exitCode = 1;
+  } else {
+    process.exitCode = result.status ?? 1;
+  }
 } finally {
   renameSync(hidden, lockfile);
 }
