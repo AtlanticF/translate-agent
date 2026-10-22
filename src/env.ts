@@ -14,10 +14,10 @@ export type AppEnv = {
 };
 
 export function loadEnvFile(path = ".env"): void {
-  if (!existsSync(path)) {
+  if (!existsSync(/* turbopackIgnore: true */ path)) {
     return;
   }
-  process.loadEnvFile(path);
+  process.loadEnvFile(/* turbopackIgnore: true */ path);
 }
 
 export function readAppEnv(env: NodeJS.ProcessEnv = process.env): AppEnv {
