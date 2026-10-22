@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/application/entry.tsx",
+    "build": "npm run build --prefix web",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
