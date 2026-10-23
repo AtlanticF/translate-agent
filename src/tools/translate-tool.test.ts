@@ -82,6 +82,7 @@ test("writes the draft when the review is approved", async () => {
   expect(writer).toHaveBeenCalledWith({
     contents: "你好",
     file_path: filePath,
+    translated_string: "你好",
   });
 });
 
@@ -104,6 +105,7 @@ test("writes the corrected string when the review is refined", async () => {
   expect(writer).toHaveBeenCalledWith({
     contents: "您好",
     file_path: filePath,
+    translated_string: "您好",
   });
 });
 
@@ -131,6 +133,7 @@ test("replaces only the unique source string", async () => {
   expect(writer).toHaveBeenCalledWith({
     contents: "before 你好 after",
     file_path: filePath,
+    translated_string: "你好",
   });
 });
 

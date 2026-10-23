@@ -4,8 +4,13 @@ import { AgentLoop } from "../agent/agent-loop.js";
 import { Context } from "../messages/context.js";
 import { Memory } from "../memory/memory.js";
 import { lsExecutor, lsTool } from "../tools/ls-tool.js";
-import { readExecutor, readTool } from "../tools/read-tool.js";
-import { createTranslateExecutor, translateTool } from "../tools/translate-tool.js";
+import { createReadExecutor, readExecutor, readTool } from "../tools/read-tool.js";
+import {
+  createTranslateExecutor,
+  translateTool,
+  type TranslateReader,
+  type TranslateWriter,
+} from "../tools/translate-tool.js";
 
 export async function createSession(): Promise<{
   loop: AgentLoop;
@@ -22,11 +27,7 @@ export async function createSession(): Promise<{
       Read: readTool,
       Translate: translateTool,
     },
-    {
-      LS: lsExecutor,
-      Read: readExecutor,
-      Translate: createTranslateExecutor({ writer: writeTranslation }),
-    },
+    toolExecutors(),
     context,
     { memory },
   );
@@ -34,7 +35,15 @@ export async function createSession(): Promise<{
   return { loop, context, memory };
 }
 
-export async function createLoop(messages: readonly ModelMessage[] = []): Promise<AgentLoop> {
+export type LoopIO = {
+  read?: TranslateReader;
+  write?: TranslateWriter;
+};
+
+export async function createLoop(
+  messages: readonly ModelMessage[] = [],
+  io: LoopIO = {},
+): Promise<AgentLoop> {
   const memory = new Memory();
   await memory.init();
   return new AgentLoop(
@@ -43,14 +52,21 @@ export async function createLoop(messages: readonly ModelMessage[] = []): Promis
       Read: readTool,
       Translate: translateTool,
     },
-    {
-      LS: lsExecutor,
-      Read: readExecutor,
-      Translate: createTranslateExecutor({ writer: writeTranslation }),
-    },
+    toolExecutors(io),
     messages,
     { memory },
   );
+}
+
+function toolExecutors(io: LoopIO = {}) {
+  return {
+    LS: lsExecutor,
+    Read: io.read ? createReadExecutor(io.read) : readExecutor,
+    Translate: createTranslateExecutor({
+      writer: io.write ?? writeTranslation,
+      read: io.read,
+    }),
+  };
 }
 
 async function writeTranslation({

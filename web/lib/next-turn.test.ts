@@ -94,3 +94,37 @@ test("returns a single step, even when the agent still has work", async () => {
   const sessionId = "sessionId" in result.body ? result.body.sessionId : "";
   expect((await sessions.get(sessionId))?.messages).toEqual([{ role: "assistant", content: "draft" }]);
 });
+
+test("tells the agent which files were imported", async () => {
+  const sessions = createSqliteSessionStore();
+  const created = await sessions.create();
+  let userText = "";
+
+  await postNext(
+    { sessionId: created.id, userInput: "translate this" },
+    undefined,
+    sessions,
+    async () => ({
+      async userInput(messages) {
+        const content = messages[0]?.content;
+        userText = typeof content === "string" ? content : "";
+      },
+      addCopilotResponses() {},
+      async next() {
+        return {
+          nextActor: "user",
+          messages: [],
+          copilotRequests: [],
+          unprocessedToolCalls: [],
+        };
+      },
+    }),
+    {
+      async list() {
+        return [{ path: "/sessions/s/files/f/readme.md" }];
+      },
+    },
+  );
+
+  expect(userText).toBe("translate this\n\nImported files:\n/sessions/s/files/f/readme.md");
+});

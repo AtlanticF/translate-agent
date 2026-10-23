@@ -20,6 +20,7 @@ export type TranslateOutput = {
 export type TranslateWriter = (params: {
   contents: string;
   file_path: string;
+  translated_string: string;
 }) => Promise<void>;
 
 export type TranslateReader = (filePath: string) => Promise<string>;
@@ -130,6 +131,7 @@ export function createTranslateExecutor({
       await writer({
         contents: replaceAt(text, found.start, input.src_string.length, output.translated_string),
         file_path: input.file_path,
+        translated_string: output.translated_string,
       });
     }
 

@@ -2,7 +2,7 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import { createSession } from "./session.js";
+import { createLoop, createSession } from "./session.js";
 
 test("shares one context with the loop", async () => {
   const { loop, context } = await createSession();
@@ -42,4 +42,40 @@ test("writes an approved translation to its file", async () => {
 
   expect(result.copilotRequests).toEqual([]);
   await expect(readFile(filePath, "utf8")).resolves.toBe("before 你好 after");
+});
+
+test("appends an approved paragraph without changing the imported source", async () => {
+  let source = "before hello after";
+  const translated: string[] = [];
+  const loop = await createLoop(
+    [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call-1",
+            toolName: "Translate",
+            input: {
+              file_path: "/sessions/s/files/f/note.txt",
+              src_string: "hello",
+              translate_string: "你好",
+            },
+          },
+        ],
+      },
+    ],
+    {
+      read: async () => source,
+      write: async ({ translated_string }) => {
+        translated.push(translated_string);
+      },
+    },
+  );
+  loop.addCopilotResponses([{ status: "approve", tool: { callId: "call-1" } }]);
+
+  await loop.next();
+
+  expect(source).toBe("before hello after");
+  expect(translated).toEqual(["你好"]);
 });

@@ -1,4 +1,4 @@
-import { getSessionStore } from "../../../lib/session-cloudflare";
+import { getSessionFileStore, getSessionStore } from "../../../lib/session-cloudflare";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
@@ -7,8 +7,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   if (!session) {
     return Response.json({ error: "session not found" }, { status: 404 });
   }
+  const files = await getSessionFileStore();
   return Response.json({
     id: session.id,
     messages: session.messages,
+    files: await files.list(id),
   });
 }

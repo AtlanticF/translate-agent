@@ -22,11 +22,16 @@ type TurnAgent = {
   next(signal?: AbortSignal): Promise<AgentLoopNext>;
 };
 
+export type ImportedFileList = {
+  list(sessionId: string): Promise<{ path: string }[]>;
+};
+
 export async function postNext(
   request: NextTurnRequest,
   signal: AbortSignal | undefined,
   sessions: SessionStore,
   openAgent: (messages: readonly ModelMessage[]) => Promise<TurnAgent> = openLoop,
+  files?: ImportedFileList,
 ): Promise<NextTurnResponse> {
   let session = request.sessionId ? await sessions.get(request.sessionId) : await sessions.create();
   if (!session) {
@@ -36,7 +41,12 @@ export async function postNext(
   const agent = await openAgent(session.messages);
   const userInput = request.userInput?.trim();
   if (userInput) {
-    const messages: UserModelMessage[] = [{ role: "user", content: userInput }];
+    const imported = files ? await files.list(session.id) : [];
+    const content =
+      imported.length === 0
+        ? userInput
+        : `${userInput}\n\nImported files:\n${imported.map((file) => file.path).join("\n")}`;
+    const messages: UserModelMessage[] = [{ role: "user", content }];
     session = await sessions.update(session.id, {
       messages: [...session.messages, ...messages],
     });

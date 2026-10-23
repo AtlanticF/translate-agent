@@ -39,6 +39,12 @@
 			"migrations_dir": "web/drizzle"
 		}
 	],
+	"kv_namespaces": [
+		{
+			"binding": "FILES",
+			"id": "97c573ed60244fe09ba5c28721fb3b1e"
+		}
+	],
 	"previews": {
 		"vars": {
 			"TRANSLATOR_MODEL": "z-ai/glm-4.5",
@@ -50,6 +56,12 @@
 				"binding": "DB",
 				"database_name": "translate-agent",
 				"database_id": "c13f8bc8-693f-400a-9423-78ab1776284d"
+			}
+		],
+		"kv_namespaces": [
+			{
+				"binding": "FILES",
+				"id": "97c573ed60244fe09ba5c28721fb3b1e"
 			}
 		]
 	}

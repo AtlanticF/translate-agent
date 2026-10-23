@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ModelMessage } from "ai";
-import { TerminalIcon } from "lucide-react";
+import { PaperclipIcon, TerminalIcon } from "lucide-react";
 import { CopilotReview } from "@/components/copilot-review";
 import { SessionSidebar } from "@/components/session-sidebar";
 import { Welcome } from "@/components/welcome";
@@ -39,6 +39,12 @@ import { runTurns } from "../lib/client-loop";
 import { toolTitle, viewItems } from "../lib/view-items";
 import type { SessionSummary } from "../lib/session-title";
 
+type ImportedFile = {
+  id: string;
+  name: string;
+  path: string;
+};
+
 export default function Home() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [sessionId, setSessionId] = useState<string | undefined>();
@@ -46,9 +52,12 @@ export default function Home() {
   const [requests, setRequests] = useState<ClientTurn["agentResponse"]["copilotRequests"]>([]);
   const [decisions, setDecisions] = useState<Record<string, CopilotReviewResponse>>({});
   const [draft, setDraft] = useState("");
+  const [files, setFiles] = useState<ImportedFile[]>([]);
+  const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const pending = useRef(false);
+  const fileInput = useRef<HTMLInputElement>(null);
   const requestsRef = useRef(requests);
   const decisionsRef = useRef(decisions);
   const items = viewItems(messages);
@@ -70,6 +79,7 @@ export default function Home() {
     setRequests([]);
     setDecisions({});
     setDraft("");
+    setFiles([]);
     setError(undefined);
   }
 
@@ -81,12 +91,15 @@ export default function Home() {
     setError(undefined);
     try {
       const response = await fetch(`/sessions/${id}`);
-      const payload = (await response.json()) as { id: string; messages: ModelMessage[] } | { error: string };
+      const payload = (await response.json()) as
+        | { id: string; messages: ModelMessage[]; files?: ImportedFile[] }
+        | { error: string };
       if (!response.ok || !("messages" in payload)) {
         throw new Error("error" in payload ? payload.error : "request failed");
       }
       setSessionId(payload.id);
       setMessages(payload.messages);
+      setFiles(payload.files ?? []);
       requestsRef.current = [];
       decisionsRef.current = {};
       setRequests([]);
@@ -214,12 +227,34 @@ export default function Home() {
         </div>
       ) : null}
       <form
-        className="mx-auto w-full max-w-3xl px-4 pb-4"
+        className={`mx-auto w-full max-w-3xl px-4 pb-4 ${dragging ? "opacity-70" : ""}`}
         onSubmit={(event) => {
           event.preventDefault();
           void send();
         }}
+        onDragOver={(event) => {
+          event.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(event) => {
+          event.preventDefault();
+          setDragging(false);
+          void upload(event.dataTransfer.files);
+        }}
       >
+        {files.length > 0 ? (
+          <ul className="mb-2 flex flex-col gap-1 text-sm">
+            {files.map((file) => (
+              <li key={file.id} className="flex items-center justify-between gap-3">
+                <span className="min-w-0 truncate">{file.name}</span>
+                <a className="shrink-0 text-cyan-700" href={downloadHref(sessionId, file.id)}>
+                  下载译文
+                </a>
+              </li>
+            ))}
+          </ul>
+        ) : null}
         <InputGroup>
           <InputGroupTextarea
             value={draft}
@@ -234,7 +269,21 @@ export default function Home() {
               }
             }}
           />
-          <InputGroupAddon align="block-end" className="justify-end">
+          <InputGroupAddon align="block-end" className="justify-between">
+            <input
+              ref={fileInput}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(event) => {
+                void upload(event.target.files);
+                event.target.value = "";
+              }}
+            />
+            <InputGroupButton type="button" size="sm" variant="ghost" onClick={() => fileInput.current?.click()}>
+              <PaperclipIcon />
+              上传
+            </InputGroupButton>
             <InputGroupButton type="submit" size="sm" disabled={busy || reviewing}>
               Send
             </InputGroupButton>
@@ -244,6 +293,33 @@ export default function Home() {
       </div>
     </div>
   );
+
+  async function upload(list: FileList | null) {
+    const selected = list ? [...list] : [];
+    if (selected.length === 0) {
+      return;
+    }
+    const id = sessionId ?? crypto.randomUUID();
+    const body = new FormData();
+    for (const file of selected) {
+      body.append("file", file);
+    }
+    setError(undefined);
+    try {
+      const response = await fetch(`/sessions/${id}/files`, { method: "POST", body });
+      const payload = (await response.json()) as
+        | { sessionId: string; files: ImportedFile[] }
+        | { error: string };
+      if (!response.ok || !("files" in payload)) {
+        throw new Error("error" in payload ? payload.error : "upload failed");
+      }
+      setSessionId(payload.sessionId);
+      setFiles(payload.files);
+      void loadSessions();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  }
 
   async function turn(body: ClientTurnBody) {
     setBusy(true);
@@ -293,6 +369,13 @@ async function postTurn(body: ClientTurnBody): Promise<ClientTurn> {
     throw new Error("error" in payload ? payload.error : "request failed");
   }
   return payload;
+}
+
+function downloadHref(sessionId: string | undefined, fileId: string): string {
+  if (!sessionId) {
+    return "#";
+  }
+  return `/sessions/${sessionId}/files/${fileId}/translated`;
 }
 
 function ToolTrace({ item }: { item: Extract<ReturnType<typeof viewItems>[number], { kind: "tool" }> }) {

@@ -70,56 +70,65 @@ const outputSchema = zodSchema(
   }),
 );
 
-export const readExecutor: ToolExecutor<ReadInput> = async (input) => {
-  if (!isAbsolute(input.file_path)) {
-    throw new Error("file_path must be an absolute path");
-  }
-
-  const offset = input.offset ?? 1;
-  const limit = input.limit ?? defaultLineLimit;
-  if (offset < 1) {
-    throw new Error("offset must be a positive line number");
-  }
-  if (limit < 1 || limit > defaultLineLimit) {
-    throw new Error("limit must be between 1 and 2000");
-  }
-
-  let text: string;
-  try {
-    text = await readFile(input.file_path, "utf8");
-  } catch (error) {
-    if (isEnoent(error)) {
-      throw new Error(`File not found: ${input.file_path}`);
+export function createReadExecutor(
+  read: (filePath: string) => Promise<string>,
+): ToolExecutor<ReadInput> {
+  return async (input) => {
+    if (!isAbsolute(input.file_path)) {
+      throw new Error("file_path must be an absolute path");
     }
-    throw error;
-  }
 
-  if (text.length === 0) {
+    const offset = input.offset ?? 1;
+    const limit = input.limit ?? defaultLineLimit;
+    if (offset < 1) {
+      throw new Error("offset must be a positive line number");
+    }
+    if (limit < 1 || limit > defaultLineLimit) {
+      throw new Error("limit must be between 1 and 2000");
+    }
+
+    const text = await read(input.file_path);
+
+    if (text.length === 0) {
+      return {
+        type: "json",
+        payload: {
+          lines: [],
+          warning: "File exists but has no contents.",
+        },
+      };
+    }
+
+    const allLines = text.split("\n");
+    if (allLines.at(-1) === "") {
+      allLines.pop();
+    }
+
+    const selected = allLines.slice(offset - 1, offset - 1 + limit);
     return {
       type: "json",
       payload: {
-        lines: [],
-        warning: "File exists but has no contents.",
+        lines: selected.map((line, index) => ({
+          line: offset + index,
+          text: line.length > maxLineLength ? line.slice(0, maxLineLength) : line,
+        })),
       },
     };
-  }
-
-  const allLines = text.split("\n");
-  if (allLines.at(-1) === "") {
-    allLines.pop();
-  }
-
-  const selected = allLines.slice(offset - 1, offset - 1 + limit);
-  return {
-    type: "json",
-    payload: {
-      lines: selected.map((line, index) => ({
-        line: offset + index,
-        text: line.length > maxLineLength ? line.slice(0, maxLineLength) : line,
-      })),
-    },
   };
-};
+}
+
+export const readExecutor = createReadExecutor(readFileText);
+
+async function readFileText(filePath: string): Promise<string> {
+  try {
+    return await readFile(filePath, "utf8");
+  } catch (error) {
+    if (isEnoent(error)) {
+      throw new Error(`File not found: ${filePath}`);
+    }
+    throw error;
+  }
+}
 
 export const readTool = Object.assign(
   tool({

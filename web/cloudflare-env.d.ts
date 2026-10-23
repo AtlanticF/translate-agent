@@ -3,6 +3,7 @@
 // Runtime types generated with workerd@1.20261019.1 2026-10-22 global_fetch_strictly_public,nodejs_compat
 interface __BaseEnv_CloudflareEnv {
 	DB: D1Database;
+	FILES: KVNamespace;
 	ASSETS: Fetcher;
 	NEXTJS_ENV: string;
 	WORKER_SELF_REFERENCE: Fetcher /* translate-agent-web */;
