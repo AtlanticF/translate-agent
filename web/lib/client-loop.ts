@@ -7,6 +7,14 @@ export type ClientTurnBody = {
   copilotResponses?: Array<CopilotResponse & { tool: { callId: string } }>;
 };
 
+export type ClientFile = {
+  id: string;
+  name: string;
+  path: string;
+  status: "open" | "done";
+  progress: number;
+};
+
 export type ClientTurn = {
   sessionId: string;
   agentResponse: {
@@ -14,6 +22,7 @@ export type ClientTurn = {
     nextActor: "user" | "agent";
     copilotRequests: CopilotRequest[];
   };
+  files?: ClientFile[];
 };
 
 // 一步 HTTP 对应一次 next()。工具调用、工具结果、模型回复各刷一次，遇到审核或该用户说话时停下。

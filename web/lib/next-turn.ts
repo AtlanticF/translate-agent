@@ -2,6 +2,8 @@ import type { ModelMessage, UserModelMessage } from "ai";
 import type { AgentLoopNext } from "../../src/agent/agent-loop";
 import type { CopilotResponseEntry } from "../../src/messages/context";
 import { withTrace } from "../../src/observability/langfuse";
+import { omitDoneFilePaths, withImportedFiles } from "./imported-files";
+import type { SessionFileStatus } from "./session-files";
 import type { SessionStore } from "./session";
 
 export type NextTurnRequest = {
@@ -10,10 +12,18 @@ export type NextTurnRequest = {
   copilotResponses?: CopilotResponseEntry[];
 };
 
+export type TurnFile = {
+  id: string;
+  name: string;
+  path: string;
+  status: SessionFileStatus;
+  progress: number;
+};
+
 export type NextTurnResponse = {
   status: number;
   body:
-    | { sessionId: string; agentResponse: AgentLoopNext }
+    | { sessionId: string; agentResponse: AgentLoopNext; files: TurnFile[] }
     | { error: string };
 };
 
@@ -24,7 +34,7 @@ type TurnAgent = {
 };
 
 export type ImportedFileList = {
-  list(sessionId: string): Promise<{ path: string }[]>;
+  list(sessionId: string): Promise<Array<{ path: string; status?: SessionFileStatus } & Partial<TurnFile>>>;
 };
 
 export async function postNext(
@@ -39,15 +49,13 @@ export async function postNext(
     return { status: 404, body: { error: "session not found" } };
   }
 
-  const agent = await openAgent(session.messages);
+  const imported = files ? await files.list(session.id) : [];
+  const donePaths = imported.filter((file) => file.status === "done").map((file) => file.path);
+  const agent = await openAgent(omitDoneFilePaths(session.messages, donePaths));
   const userInput = request.userInput?.trim();
   if (userInput) {
-    const imported = files ? await files.list(session.id) : [];
-    const content =
-      imported.length === 0
-        ? userInput
-        : `${userInput}\n\nImported files:\n${imported.map((file) => file.path).join("\n")}`;
-    const messages: UserModelMessage[] = [{ role: "user", content }];
+    const pending = imported.filter((file) => file.status !== "done").map((file) => file.path);
+    const messages: UserModelMessage[] = [{ role: "user", content: withImportedFiles(userInput, pending) }];
     session = await sessions.update(session.id, {
       messages: [...session.messages, ...messages],
     });
@@ -63,15 +71,40 @@ export async function postNext(
   }
 
   const step = await withTrace("web", session.id, () => agent.next(signal));
-  if (step.messages.length > 0) {
-    await sessions.update(session.id, {
-      messages: [...session.messages, ...step.messages],
-    });
+  const after = files ? await files.list(session.id) : [];
+  const stored =
+    step.messages.length > 0 ? [...session.messages, ...step.messages] : session.messages;
+  const cleaned = omitDoneFilePaths(
+    stored,
+    after.filter((file) => file.status === "done").map((file) => file.path),
+  );
+  if (cleaned !== session.messages) {
+    await sessions.update(session.id, { messages: [...cleaned] });
   }
   return {
     status: 200,
-    body: { sessionId: session.id, agentResponse: step },
+    body: { sessionId: session.id, agentResponse: step, files: fileList(after) },
   };
+}
+
+function fileList(
+  files: ReadonlyArray<{ path: string; status?: SessionFileStatus } & Partial<TurnFile>>,
+): TurnFile[] {
+  const listed: TurnFile[] = [];
+  for (const file of files) {
+    if (!file.id || !file.name) {
+      continue;
+    }
+    const status = file.status === "done" ? "done" : "open";
+    listed.push({
+      id: file.id,
+      name: file.name,
+      path: file.path,
+      status,
+      progress: status === "done" ? 1 : (file.progress ?? 0),
+    });
+  }
+  return listed;
 }
 
 async function openLoop(messages: readonly ModelMessage[]): Promise<TurnAgent> {

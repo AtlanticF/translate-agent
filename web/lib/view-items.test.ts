@@ -38,3 +38,14 @@ test("shows user text, assistant text, and a tool from call through result", () 
     "Ran Read",
   );
 });
+
+test("hides the imported file list from the user bubble", () => {
+  const items = viewItems([
+    {
+      role: "user",
+      content: "translate this\n\nImported files:\n/sessions/s/files/f/a.txt",
+    },
+  ]);
+
+  expect(items[0]).toMatchObject({ kind: "user", text: "translate this" });
+});

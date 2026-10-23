@@ -26,8 +26,11 @@ async function openLoop(messages: readonly ModelMessage[], files: SessionFileSto
   const session = await import("../../lib/agent-session.js");
   return session.createLoop(messages, {
     read: (filePath) => files.readOriginalText(filePath),
-    write: async ({ file_path, translated_string }) => {
-      await files.appendTranslated(file_path, translated_string);
+    write: async ({ file_path, translated_string, source_start, source_end }) => {
+      await files.appendTranslated(file_path, translated_string, {
+        start: source_start,
+        end: source_end,
+      });
     },
   });
 }

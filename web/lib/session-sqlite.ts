@@ -8,5 +8,6 @@ export function createSqliteSessionStore(now?: () => Date) {
   const sqlite = new Database(":memory:");
   sqlite.exec(readFileSync(new URL("../drizzle/0000_sessions.sql", import.meta.url), "utf8"));
   sqlite.exec(readFileSync(new URL("../drizzle/0001_session_files.sql", import.meta.url), "utf8"));
+  sqlite.exec(readFileSync(new URL("../drizzle/0002_session_file_progress.sql", import.meta.url), "utf8"));
   return createSessionStore(drizzle(sqlite, { schema }), { now });
 }

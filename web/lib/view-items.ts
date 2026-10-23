@@ -1,4 +1,5 @@
 import type { ModelMessage } from "ai";
+import { visibleUserText } from "./imported-files";
 
 export type ViewItem =
   | { id: string; kind: "user"; text: string }
@@ -17,7 +18,7 @@ export function viewItems(messages: readonly ModelMessage[]): ViewItem[] {
 
   messages.forEach((message, index) => {
     if (message.role === "user") {
-      const text = textOf(message.content);
+      const text = visibleUserText(textOf(message.content));
       if (text) {
         items.push({ id: `user-${index}`, kind: "user", text });
       }

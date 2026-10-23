@@ -18,5 +18,8 @@ export const sessionFiles = sqliteTable("session_files", {
   name: text("name").notNull(),
   mediaType: text("media_type").notNull(),
   size: integer("size").notNull(),
+  status: text("status").$type<"open" | "done">().notNull().default("open"),
+  covered: text("covered", { mode: "json" }).$type<[number, number][]>().notNull().default([]),
+  sourceChars: integer("source_chars").notNull().default(0),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 });

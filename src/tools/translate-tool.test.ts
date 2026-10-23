@@ -83,6 +83,8 @@ test("writes the draft when the review is approved", async () => {
     contents: "你好",
     file_path: filePath,
     translated_string: "你好",
+    source_start: 0,
+    source_end: 5,
   });
 });
 
@@ -106,6 +108,8 @@ test("writes the corrected string when the review is refined", async () => {
     contents: "您好",
     file_path: filePath,
     translated_string: "您好",
+    source_start: 0,
+    source_end: 5,
   });
 });
 
@@ -134,6 +138,8 @@ test("replaces only the unique source string", async () => {
     contents: "before 你好 after",
     file_path: filePath,
     translated_string: "你好",
+    source_start: 7,
+    source_end: 12,
   });
 });
 

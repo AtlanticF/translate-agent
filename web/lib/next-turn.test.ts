@@ -128,3 +128,112 @@ test("tells the agent which files were imported", async () => {
 
   expect(userText).toBe("translate this\n\nImported files:\n/sessions/s/files/f/readme.md");
 });
+
+test("drops finished files from the next message and from earlier context", async () => {
+  const sessions = createSqliteSessionStore();
+  const created = await sessions.create();
+  await sessions.update(created.id, {
+    messages: [
+      {
+        role: "user",
+        content:
+          "translate this\n\nImported files:\n/sessions/s/files/done/a.txt\n/sessions/s/files/open/b.txt",
+      },
+    ],
+  });
+  const seen: string[] = [];
+
+  await postNext(
+    { sessionId: created.id, userInput: "what next" },
+    undefined,
+    sessions,
+    async (messages) => {
+      for (const message of messages) {
+        seen.push(typeof message.content === "string" ? message.content : "");
+      }
+      return {
+        async userInput(next) {
+          const content = next[0]?.content;
+          seen.push(typeof content === "string" ? content : "");
+        },
+        addCopilotResponses() {},
+        async next() {
+          return {
+            nextActor: "user",
+            messages: [],
+            copilotRequests: [],
+            unprocessedToolCalls: [],
+          };
+        },
+      };
+    },
+    {
+      async list() {
+        return [
+          { path: "/sessions/s/files/done/a.txt", status: "done" as const },
+          { path: "/sessions/s/files/open/b.txt", status: "open" as const },
+        ];
+      },
+    },
+  );
+
+  expect(seen).toEqual([
+    "translate this\n\nImported files:\n/sessions/s/files/open/b.txt",
+    "what next\n\nImported files:\n/sessions/s/files/open/b.txt",
+  ]);
+  expect((await sessions.get(created.id))?.messages).toEqual([
+    {
+      role: "user",
+      content: "translate this\n\nImported files:\n/sessions/s/files/open/b.txt",
+    },
+    { role: "user", content: "what next\n\nImported files:\n/sessions/s/files/open/b.txt" },
+  ]);
+});
+
+test("omits the file list once every imported file is finished", async () => {
+  const sessions = createSqliteSessionStore();
+  const created = await sessions.create();
+  await sessions.update(created.id, {
+    messages: [
+      {
+        role: "user",
+        content: "translate this\n\nImported files:\n/sessions/s/files/done/a.txt",
+      },
+    ],
+  });
+  let userText = "";
+
+  await postNext(
+    { sessionId: created.id, userInput: "thanks" },
+    undefined,
+    sessions,
+    async () => {
+      return {
+        async userInput(next) {
+          const content = next[0]?.content;
+          userText = typeof content === "string" ? content : "";
+        },
+        addCopilotResponses() {},
+        async next() {
+          return {
+            nextActor: "user",
+            messages: [],
+            copilotRequests: [],
+            unprocessedToolCalls: [],
+          };
+        },
+      };
+    },
+    {
+      async list() {
+        return [{ path: "/sessions/s/files/done/a.txt", status: "done" as const }];
+      },
+    },
+  );
+
+  expect(userText).toBe("thanks");
+  expect((await sessions.get(created.id))?.messages[0]).toEqual({
+    role: "user",
+    content: "translate this",
+  });
+});

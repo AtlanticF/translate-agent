@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { ModelMessage } from "ai";
-import { PaperclipIcon, TerminalIcon } from "lucide-react";
+import { Loader2Icon, PaperclipIcon, TerminalIcon } from "lucide-react";
 import { CopilotReview } from "@/components/copilot-review";
 import { SessionSidebar } from "@/components/session-sidebar";
 import { Welcome } from "@/components/welcome";
@@ -15,6 +15,7 @@ import {
   InputGroupTextarea,
 } from "@/components/ui/input-group";
 import { Message, MessageContent } from "@/components/ui/message";
+import { Progress } from "@/components/ui/progress";
 import {
   MessageScroller,
   MessageScrollerContent,
@@ -34,16 +35,12 @@ import {
 import { inputPlaceholder, submittedUserText } from "../../shared/welcome";
 import type { CopilotReviewResponse } from "../lib/copilot-batch";
 import { noteCopilotDecision } from "../lib/copilot-batch";
-import type { ClientTurn, ClientTurnBody } from "../lib/client-loop";
+import type { ClientFile, ClientTurn, ClientTurnBody } from "../lib/client-loop";
 import { runTurns } from "../lib/client-loop";
 import { toolTitle, viewItems } from "../lib/view-items";
 import type { SessionSummary } from "../lib/session-title";
 
-type ImportedFile = {
-  id: string;
-  name: string;
-  path: string;
-};
+type ImportedFile = ClientFile;
 
 export default function Home() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -56,6 +53,7 @@ export default function Home() {
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  const [reveal, setReveal] = useState<"restore" | "live">("live");
   const pending = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const requestsRef = useRef(requests);
@@ -68,10 +66,19 @@ export default function Home() {
     void loadSessions();
   }, []);
 
+  useEffect(() => {
+    if (reveal !== "restore") {
+      return;
+    }
+    const timer = window.setTimeout(() => setReveal("live"), 800);
+    return () => window.clearTimeout(timer);
+  }, [reveal]);
+
   function newSession() {
     if (pending.current) {
       return;
     }
+    setReveal("live");
     setSessionId(undefined);
     setMessages([]);
     requestsRef.current = [];
@@ -97,6 +104,7 @@ export default function Home() {
       if (!response.ok || !("messages" in payload)) {
         throw new Error("error" in payload ? payload.error : "request failed");
       }
+      setReveal("restore");
       setSessionId(payload.id);
       setMessages(payload.messages);
       setFiles(payload.files ?? []);
@@ -172,13 +180,23 @@ export default function Home() {
             <MessageScroller className="h-full">
               <MessageScrollerViewport>
                 <MessageScrollerContent className="mx-auto w-full max-w-3xl px-4 py-8">
-                  {items.map((item) =>
+                  {items.map((item, index) =>
                     item.kind === "tool" ? (
-                      <MessageScrollerItem key={item.id} messageId={item.id}>
+                      <MessageScrollerItem
+                        key={item.id}
+                        messageId={item.id}
+                        className={enterClass("tool")}
+                        style={enterStyle(index, reveal)}
+                      >
                         <ToolTrace item={item} />
                       </MessageScrollerItem>
                     ) : (
-                      <MessageScrollerItem key={item.id} messageId={item.id}>
+                      <MessageScrollerItem
+                        key={item.id}
+                        messageId={item.id}
+                        className={enterClass(item.kind)}
+                        style={enterStyle(index, reveal)}
+                      >
                         <Message align={item.kind === "user" ? "end" : "start"}>
                           <MessageContent>
                             <Bubble
@@ -193,10 +211,17 @@ export default function Home() {
                     ),
                   )}
                   {busy ? (
-                    <MessageScrollerItem messageId="processing">
+                    <MessageScrollerItem
+                      messageId="processing"
+                      className={enterClass("assistant")}
+                      style={enterStyle(items.length, reveal)}
+                    >
                       <Trace>
-                        <TraceLine>
-                          <TraceTitle>Processing ...</TraceTitle>
+                        <TraceLine status="running">
+                          <TraceIcon>
+                            <Loader2Icon className="animate-spin" />
+                          </TraceIcon>
+                          <TraceTitle>Processing</TraceTitle>
                         </TraceLine>
                       </Trace>
                     </MessageScrollerItem>
@@ -244,14 +269,9 @@ export default function Home() {
         }}
       >
         {files.length > 0 ? (
-          <ul className="mb-2 flex flex-col gap-1 text-sm">
+          <ul className="mb-2 flex flex-col gap-2">
             {files.map((file) => (
-              <li key={file.id} className="flex items-center justify-between gap-3">
-                <span className="min-w-0 truncate">{file.name}</span>
-                <a className="shrink-0 text-cyan-700" href={downloadHref(sessionId, file.id)}>
-                  下载译文
-                </a>
-              </li>
+              <FileProgress key={file.id} file={file} sessionId={sessionId} busy={busy} />
             ))}
           </ul>
         ) : null}
@@ -327,6 +347,9 @@ export default function Home() {
     try {
       await runTurns(postTurn, body, (step) => {
         setSessionId(step.sessionId);
+        if (step.files) {
+          setFiles(step.files);
+        }
         if (step.agentResponse.messages.length > 0) {
           setMessages((current) => [...current, ...step.agentResponse.messages]);
         }
@@ -369,6 +392,52 @@ async function postTurn(body: ClientTurnBody): Promise<ClientTurn> {
     throw new Error("error" in payload ? payload.error : "request failed");
   }
   return payload;
+}
+
+function FileProgress({
+  file,
+  sessionId,
+  busy,
+}: {
+  file: ImportedFile;
+  sessionId: string | undefined;
+  busy: boolean;
+}) {
+  const waiting = busy && file.status !== "done" && file.progress <= 0;
+  const value = file.status === "done" ? 100 : waiting ? null : Math.round(file.progress * 100);
+  const label = file.status === "done" ? "已完成" : waiting ? "翻译中" : `${Math.round(file.progress * 100)}%`;
+  return (
+    <li className="flex flex-col gap-1.5 text-sm">
+      <div className="flex items-center gap-3">
+        <span className="min-w-0 truncate">{file.name}</span>
+        <span className="ml-auto shrink-0 text-muted-foreground tabular-nums">{label}</span>
+        <a className="shrink-0 text-cyan-700" href={downloadHref(sessionId, file.id)}>
+          下载译文
+        </a>
+      </div>
+      <Progress
+        value={value}
+        aria-label={`${file.name} 翻译进度`}
+        className="gap-0 [&_[data-slot=progress-track]]:h-1.5 [&_[data-slot=progress-track]]:bg-foreground/15"
+      />
+    </li>
+  );
+}
+
+function enterClass(kind: "user" | "assistant" | "tool"): string {
+  const motion = "animate-in fade-in duration-300 fill-mode-both motion-reduce:animate-none";
+  if (kind === "user") {
+    return `${motion} slide-in-from-bottom-4 zoom-in-95`;
+  }
+  return `${motion} slide-in-from-bottom-2`;
+}
+
+function enterStyle(index: number, reveal: "restore" | "live"): CSSProperties | undefined {
+  if (reveal !== "restore") {
+    return undefined;
+  }
+  const delay = `${Math.min(index, 12) * 40}ms`;
+  return { animationDelay: delay, "--tw-animation-delay": delay } as CSSProperties;
 }
 
 function downloadHref(sessionId: string | undefined, fileId: string): string {

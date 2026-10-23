@@ -34,6 +34,44 @@ test("stores an original copy and appends only approved translations", async () 
   expect(bucket.objects.has(`sessions/${session.id}/${saved.id}/original`)).toBe(true);
 });
 
+test("marks a file done when approved spans cover the source", async () => {
+  const { files } = openStore();
+  const source = "hello\n\nworld";
+  const saved = await files.add("session-1", {
+    name: "a.txt",
+    mediaType: "text/plain",
+    bytes: new TextEncoder().encode(source),
+  });
+
+  expect(saved.status).toBe("open");
+  expect(saved.progress).toBe(0);
+
+  await files.appendTranslated(saved.path, "你好", { start: 0, end: 5 });
+  const partial = (await files.list("session-1"))[0];
+  expect(partial?.status).toBe("open");
+  expect(partial?.progress).toBeCloseTo(5 / source.length);
+
+  await files.appendTranslated(saved.path, "世界", { start: 7, end: source.length });
+  const done = (await files.list("session-1"))[0];
+  expect(done?.status).toBe("done");
+  expect(done?.progress).toBe(1);
+  expect(await files.readOriginalText(saved.path)).toBe(source);
+  expect(await files.readTranslated("session-1", saved.id)).toBe("你好\n\n世界");
+});
+
+test("keeps a file open when a paragraph is still untranslated", async () => {
+  const { files } = openStore();
+  const saved = await files.add("session-1", {
+    name: "a.txt",
+    mediaType: "text/plain",
+    bytes: new TextEncoder().encode("hello\n\nworld"),
+  });
+
+  await files.appendTranslated(saved.path, "世界", { start: 7, end: 12 });
+
+  expect((await files.list("session-1"))[0]).toMatchObject({ status: "open" });
+});
+
 test("lists files for one session and removes them with the session", async () => {
   const { sessions, files, bucket } = openStore();
   const first = await sessions.create({ id: "first" });
@@ -83,6 +121,7 @@ function openStore() {
   const sqlite = new Database(":memory:");
   sqlite.exec(readFileSync(new URL("../drizzle/0000_sessions.sql", import.meta.url), "utf8"));
   sqlite.exec(readFileSync(new URL("../drizzle/0001_session_files.sql", import.meta.url), "utf8"));
+  sqlite.exec(readFileSync(new URL("../drizzle/0002_session_file_progress.sql", import.meta.url), "utf8"));
   const db = drizzle(sqlite, { schema });
   const bucket = memoryBucket();
   return {
