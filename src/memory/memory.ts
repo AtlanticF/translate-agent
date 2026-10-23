@@ -100,6 +100,7 @@ export class Memory implements MemorySource {
             reasoning: { enabled: false },
           },
         },
+        telemetry: { functionId: "memory" },
       });
       await appendFile("/tmp/translator-agent.log", `[memory] Current memory: ${JSON.stringify(this.current)}\n`);
       // write log into file: /tmp/translator-agent.log

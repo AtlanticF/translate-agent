@@ -13,6 +13,7 @@ import type { MemorySource } from "../memory/memory.js";
 import { Context, type CopilotResponseEntry } from "../messages/context.js";
 import type { CopilotRequest, CopilotResponse } from "../prompts/system.memory.js";
 import { SYSTEM_WORKFLOW } from "../prompts/system.workflow.js";
+import { traceTool } from "../observability/langfuse.js";
 import type { ToolExecutor } from "../tools/executor.js";
 
 export type AgentLoopOptions = {
@@ -139,6 +140,7 @@ export class AgentLoop {
         messages: this.context.toModelMessages(),
         stopWhen: stepCountIs(1),
         abortSignal: signal,
+        telemetry: { functionId: "translator" },
       });
     } catch (error) {
       if (signal?.aborted) {
@@ -229,7 +231,9 @@ export class AgentLoop {
     };
 
     try {
-      const result = await executor(input, options, copilotResponse);
+      const result = await traceTool(part.toolName, input, () =>
+        executor(input, options, copilotResponse),
+      );
 
       if (result.type === "copilot-request") {
         return result;

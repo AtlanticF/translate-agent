@@ -1,6 +1,7 @@
 import type { ModelMessage, UserModelMessage } from "ai";
 import type { AgentLoopNext } from "../../src/agent/agent-loop";
 import type { CopilotResponseEntry } from "../../src/messages/context";
+import { withTrace } from "../../src/observability/langfuse";
 import type { SessionStore } from "./session";
 
 export type NextTurnRequest = {
@@ -61,7 +62,7 @@ export async function postNext(
     agent.addCopilotResponses(pendingResponses);
   }
 
-  const step = await agent.next(signal);
+  const step = await withTrace("web", session.id, () => agent.next(signal));
   if (step.messages.length > 0) {
     await sessions.update(session.id, {
       messages: [...session.messages, ...step.messages],

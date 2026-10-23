@@ -12,6 +12,7 @@ import { MemoryScreen, type MemoryLine } from "./memory-screen.js";
 import { CopilotScreen } from "./copilot-screen.js";
 import { rememberReview, type Paragraph } from "./paragraphs.js";
 import { runUntilPause, type Pause } from "./pause.js";
+import { cliSessionId, withTrace } from "../observability/langfuse.js";
 import { createSession } from "./session.js";
 import { startup } from "./startup.js";
 import { lookupCommand } from "./commands.js";
@@ -247,7 +248,7 @@ export function App({ start = createSession }: AppProps): ReactElement {
     }
     setScreen({ kind: "compact", messages, phase: "running" });
     try {
-      const result = await session.context.compact();
+      const result = await withTrace("cli", cliSessionId(), () => session.context.compact());
       if (!alive.current) {
         return;
       }
@@ -269,7 +270,7 @@ export function App({ start = createSession }: AppProps): ReactElement {
       return;
     }
     try {
-      const messages = await settleReview(session, exit);
+      const messages = await withTrace("cli", cliSessionId(), () => settleReview(session, exit));
       if (!alive.current) {
         return;
       }
@@ -350,7 +351,7 @@ export function App({ start = createSession }: AppProps): ReactElement {
           ? [...prior, { role: "user" as const, content: argument }]
           : prior;
       const pause = await watch(seed, (onStep, signal) =>
-        submit(session, argument, onStep, signal),
+        withTrace("cli", cliSessionId(), () => submit(session, argument, onStep, signal)),
       );
       await show(session, pause);
     } catch (error) {

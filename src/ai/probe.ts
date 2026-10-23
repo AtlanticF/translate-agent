@@ -47,6 +47,7 @@ async function ping(model: OpenRouterModel): Promise<void> {
     prompt: "ping",
     maxOutputTokens: 1,
     maxRetries: 0,
+    telemetry: { isEnabled: false },
   });
 }
 

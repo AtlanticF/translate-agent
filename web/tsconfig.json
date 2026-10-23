@@ -22,6 +22,12 @@
       "@/*": ["./*"],
       "ai": ["./node_modules/ai"],
       "@ai-sdk/openai-compatible": ["./node_modules/@ai-sdk/openai-compatible"],
+      "@langfuse/otel": ["./node_modules/@langfuse/otel"],
+      "@langfuse/tracing": ["./node_modules/@langfuse/tracing"],
+      "@langfuse/vercel-ai-sdk": ["./node_modules/@langfuse/vercel-ai-sdk"],
+      "@opentelemetry/api": ["./node_modules/@opentelemetry/api"],
+      "@opentelemetry/context-async-hooks": ["./node_modules/@opentelemetry/context-async-hooks"],
+      "@opentelemetry/sdk-trace-base": ["./node_modules/@opentelemetry/sdk-trace-base"],
       "zod": ["./node_modules/zod"]
     }
   },

@@ -62,6 +62,7 @@ export class Context<TMessage extends ModelMessage = ModelMessage> {
         ...this.toModelMessages(),
         { role: "user", content: COMPACT_INSTRUCTION },
       ],
+      telemetry: { functionId: "compact" },
     });
     const parsed = parseCompact(result.text);
     this.activeMessages = [
