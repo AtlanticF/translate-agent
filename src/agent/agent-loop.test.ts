@@ -132,6 +132,33 @@ test("sends saved preferences to the translator", async () => {
   );
 });
 
+test("sends the skills catalog and activation policy to the translator", async () => {
+  generateTextMock.mockResolvedValue({
+    toolCalls: [],
+    finishReason: "stop",
+    finalStep: {
+      response: { messages: [{ role: "assistant", content: "done" }] },
+    },
+  } as unknown as Awaited<ReturnType<typeof generateText>>);
+  const skillsPrompt = "<available_skills><skill><name>pdf-processing</name></skill></available_skills>";
+  const loop = new AgentLoop({}, {}, new Context([{ role: "user", content: "go" }]), {
+    skillsPrompt,
+  });
+
+  await loop.next();
+
+  expect(generateTextMock).toHaveBeenCalledWith(
+    expect.objectContaining({
+      system: expect.stringContaining(skillsPrompt),
+    }),
+  );
+  expect(generateTextMock).toHaveBeenCalledWith(
+    expect.objectContaining({
+      system: expect.stringContaining("Always start by reading the skill location file"),
+    }),
+  );
+});
+
 test("returns the user when the model response has no messages", async () => {
   generateTextMock.mockResolvedValue({
     toolCalls: [{ toolCallId: "call-1", toolName: "LS", input: { path: "." } }],

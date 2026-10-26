@@ -1,7 +1,11 @@
+import { SKILL_ACTIVATION_POLICY } from "../skills/prompt.js";
+
 export function SYSTEM_WORKFLOW({
   currentMemory,
+  skillsPrompt,
 }: {
   currentMemory: string;
+  skillsPrompt?: string;
 }): string {
   return `
 You are a translation agent. Follow the workflow below.
@@ -73,6 +77,21 @@ ${
 The following preferences were emphasized in prior interactions; please follow them:
 ${currentMemory}`
     : ""
-}
+}${skillsSection(skillsPrompt)}
 `;
+}
+
+function skillsSection(skillsPrompt: string | undefined): string {
+  const catalog = skillsPrompt?.trim() ?? "";
+  if (!catalog) return "";
+
+  return `
+
+# Skills
+
+The skills listed below are available for this agent to use. Activate a matching skill when it fits the user's intent and request. If no skill can satisfy the request or solve the user's problem, do not activate one.
+
+${catalog}
+
+${SKILL_ACTIVATION_POLICY}`;
 }

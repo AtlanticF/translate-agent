@@ -18,6 +18,7 @@ import type { ToolExecutor } from "../tools/executor.js";
 
 export type AgentLoopOptions = {
   memory?: MemorySource;
+  skillsPrompt?: string;
 };
 
 export type NextActor = "user" | "agent";
@@ -134,6 +135,7 @@ export class AgentLoop {
         model: models.translator,
         system: SYSTEM_WORKFLOW({
           currentMemory: this.options.memory?.provideMemory() ?? "",
+          skillsPrompt: this.options.skillsPrompt,
         }),
         // 去掉 execute，避免 SDK 自己跑工具；协同请求要由这里拦截。
         tools: toolsWithoutExecute(this.toolsDef),
