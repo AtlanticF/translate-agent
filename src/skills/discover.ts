@@ -1,5 +1,6 @@
+import { SCAN_MAX_DEPTH, SCAN_MAX_DIRECTORIES, SKIP_DIRECTORY_NAMES, SKILL_FILENAME } from "./constants.js";
 import type { SkillDiagnostic } from "./diagnostics.js";
-import type { SkillFs } from "./fs.js";
+import type { SkillDirEntry, SkillFs } from "./fs.js";
 
 /**
  * 一个 skills 根目录。
@@ -37,3 +38,70 @@ export type DiscoverSkills = (
   fs: SkillFs,
   roots: readonly SkillRoot[],
 ) => Promise<DiscoverSkillsResult>;
+
+const skipDirectories = new Set<string>(SKIP_DIRECTORY_NAMES);
+
+export const discoverSkills: DiscoverSkills = async (fs, roots) => {
+  const skills: DiscoveredSkill[] = [];
+  const diagnostics: SkillDiagnostic[] = [];
+  let visited = 0;
+  let truncated = false;
+
+  for (const root of roots) {
+    if (truncated) break;
+    if (!(await fs.exists(root.path))) continue;
+    await walk(root, root.path, 0);
+  }
+
+  return { skills, diagnostics };
+
+  async function walk(root: SkillRoot, dir: string, depth: number): Promise<void> {
+    if (truncated) return;
+    visited += 1;
+    if (visited > SCAN_MAX_DIRECTORIES) {
+      noteTruncation(dir);
+      return;
+    }
+
+    if (depth > 0 && (await fs.exists(fs.join(dir, SKILL_FILENAME)))) {
+      skills.push({
+        location: fs.join(dir, SKILL_FILENAME),
+        parentName: fs.basename(dir),
+        rootPath: root.path,
+        precedence: root.precedence,
+      });
+      return;
+    }
+
+    let entries: readonly SkillDirEntry[] = [];
+    try {
+      entries = await fs.readDir(dir);
+    } catch {
+      return;
+    }
+    const children = entries
+      .filter((entry) => entry.kind === "directory" && !skipDirectories.has(entry.name))
+      .sort((left, right) => left.name.localeCompare(right.name));
+
+    if (depth >= SCAN_MAX_DEPTH) {
+      if (children.length > 0) noteTruncation(dir);
+      return;
+    }
+
+    for (const child of children) {
+      await walk(root, fs.join(dir, child.name), depth + 1);
+      if (truncated) return;
+    }
+  }
+
+  function noteTruncation(location: string): void {
+    if (truncated) return;
+    truncated = true;
+    diagnostics.push({
+      level: "warn",
+      code: "scan-truncated",
+      message: "扫描达到深度或目录数量上限",
+      location,
+    });
+  }
+};

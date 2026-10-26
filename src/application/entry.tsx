@@ -13,6 +13,8 @@ import { CopilotScreen } from "./copilot-screen.js";
 import { rememberReview, type Paragraph } from "./paragraphs.js";
 import { runUntilPause, type Pause } from "./pause.js";
 import { cliSessionId, withTrace } from "../observability/langfuse.js";
+import { SYSTEM_WORKFLOW } from "../prompts/system.workflow.js";
+import { loadProjectSkills } from "./load-skills.js";
 import { createSession } from "./session.js";
 import { startup } from "./startup.js";
 import { lookupCommand } from "./commands.js";
@@ -377,6 +379,22 @@ function isDirectRun(): boolean {
 
 if (isDirectRun()) {
   void startup(() => {
-    render(<App />);
+    void bootCli();
   });
+}
+
+async function bootCli(): Promise<void> {
+  const loaded = await loadProjectSkills();
+  const session = await createSession({ skillsPrompt: loaded.prompt });
+  console.error(
+    `[debug] system prompt\n${SYSTEM_WORKFLOW({
+      currentMemory: session.memory.provideMemory(),
+      skillsPrompt: loaded.prompt,
+    })}`,
+  );
+  for (const item of loaded.diagnostics) {
+    const where = item.location ? ` ${item.location}` : "";
+    console.error(`[debug] skill ${item.level} ${item.code}${where}: ${item.message}`);
+  }
+  render(<App start={async () => session} />);
 }

@@ -12,7 +12,9 @@ import {
   type TranslateWriter,
 } from "../tools/translate-tool.js";
 
-export async function createSession(): Promise<{
+export async function createSession(
+  options: { skillsPrompt?: string } = {},
+): Promise<{
   loop: AgentLoop;
   context: Context;
   memory: Memory;
@@ -29,7 +31,7 @@ export async function createSession(): Promise<{
     },
     toolExecutors(),
     context,
-    { memory },
+    { memory, skillsPrompt: options.skillsPrompt },
   );
 
   return { loop, context, memory };

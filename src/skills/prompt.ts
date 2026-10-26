@@ -1,4 +1,5 @@
 import type { SkillRecord } from "./catalog.js";
+import { XML_TAGS } from "./constants.js";
 
 /**
  * 有 skill 时放在 catalog XML 前面。
@@ -44,3 +45,31 @@ Skill activation is a deliberate, multi-step process and must follow the rules b
  * system prompt 收到非空结果后，会再附上 SKILL_ACTIVATION_POLICY。
  */
 export type BuildSkillsPrompt = (skills: readonly SkillRecord[]) => string;
+
+export const buildSkillsPrompt: BuildSkillsPrompt = (skills) => {
+  if (skills.length === 0) return "";
+
+  const items = skills
+    .map(
+      (skill) => `  <${XML_TAGS.skill}>
+    <${XML_TAGS.name}>${escapeXml(skill.name)}</${XML_TAGS.name}>
+    <${XML_TAGS.description}>${escapeXml(skill.description)}</${XML_TAGS.description}>
+    <${XML_TAGS.location}>${escapeXml(skill.location)}</${XML_TAGS.location}>
+  </${XML_TAGS.skill}>`,
+    )
+    .join("\n");
+
+  return `${SKILLS_PROMPT_INSTRUCTIONS}
+<${XML_TAGS.availableSkills}>
+${items}
+</${XML_TAGS.availableSkills}>`;
+};
+
+function escapeXml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
