@@ -2,10 +2,21 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { ModelMessage } from "ai";
-import { Loader2Icon, PaperclipIcon, TerminalIcon } from "lucide-react";
+import { Loader2Icon, PaperclipIcon, TerminalIcon, Trash2Icon } from "lucide-react";
 import { CopilotReview } from "@/components/copilot-review";
 import { SessionSidebar } from "@/components/session-sidebar";
 import { Welcome } from "@/components/welcome";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogMedia,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { CodeBlock, CodeBlockContent } from "@/components/ui/code-block";
 import {
@@ -45,6 +56,8 @@ type ImportedFile = ClientFile;
 export default function Home() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [sessionId, setSessionId] = useState<string | undefined>();
+  const [deleteTarget, setDeleteTarget] = useState<SessionSummary>();
+  const [deleting, setDeleting] = useState(false);
   const [messages, setMessages] = useState<ModelMessage[]>([]);
   const [requests, setRequests] = useState<ClientTurn["agentResponse"]["copilotRequests"]>([]);
   const [decisions, setDecisions] = useState<Record<string, CopilotReviewResponse>>({});
@@ -88,6 +101,33 @@ export default function Home() {
     setDraft("");
     setFiles([]);
     setError(undefined);
+  }
+
+  async function deleteSession() {
+    const target = deleteTarget;
+    if (!target || deleting) {
+      return;
+    }
+    setDeleting(true);
+    setError(undefined);
+    try {
+      const response = await fetch(`/sessions/${target.id}`, { method: "DELETE" });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => undefined)) as
+          | { error?: string }
+          | undefined;
+        throw new Error(payload?.error ?? "request failed");
+      }
+      setSessions((current) => current.filter((session) => session.id !== target.id));
+      if (target.id === sessionId) {
+        newSession();
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setDeleteTarget(undefined);
+      setDeleting(false);
+    }
   }
 
   async function openSession(id: string) {
@@ -170,6 +210,7 @@ export default function Home() {
         disabled={busy}
         onNew={newSession}
         onSelect={(id) => void openSession(id)}
+        onDelete={setDeleteTarget}
       />
       <div className="flex min-w-0 flex-1 flex-col">
       <div className="min-h-0 flex-1">
@@ -311,6 +352,36 @@ export default function Home() {
         </InputGroup>
       </form>
       </div>
+      <AlertDialog
+        open={deleteTarget !== undefined}
+        onOpenChange={(open) => {
+          if (!open && !deleting) {
+            setDeleteTarget(undefined);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogMedia className="bg-destructive/10 text-destructive">
+              <Trash2Icon />
+            </AlertDialogMedia>
+            <AlertDialogTitle>删除会话？</AlertDialogTitle>
+            <AlertDialogDescription>
+              “{deleteTarget?.title}”及其上传的文件将被永久删除，此操作无法撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={deleting}
+              onClick={() => void deleteSession()}
+            >
+              {deleting ? "删除中…" : "删除"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 
