@@ -44,6 +44,51 @@ test("writes an approved translation to its file", async () => {
   await expect(readFile(filePath, "utf8")).resolves.toBe("before 你好 after");
 });
 
+test("routes LS tool calls through the injected directory reader", async () => {
+  const seen: string[] = [];
+  const loop = await createLoop(
+    [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call-1",
+            toolName: "LS",
+            input: { path: "/.skills" },
+          },
+        ],
+      },
+    ],
+    {
+      ls: async (path) => {
+        seen.push(path);
+        return [{ name: "blog-translate", kind: "directory" }];
+      },
+    },
+  );
+
+  const result = await loop.next();
+
+  expect(seen).toEqual(["/.skills"]);
+  expect(result.messages).toEqual([
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "call-1",
+          toolName: "LS",
+          output: {
+            type: "json",
+            value: [{ name: "blog-translate", type: "directory" }],
+          },
+        },
+      ],
+    },
+  ]);
+});
+
 test("appends an approved paragraph without changing the imported source", async () => {
   let source = "before hello after";
   const translated: string[] = [];

@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import { lsTool } from "./ls-tool.js";
+import { createLsExecutor, lsTool } from "./ls-tool.js";
 
 test("lists files and directories in the given path", async () => {
   const directory = await mkdtemp(join(tmpdir(), "ls-tool-"));
@@ -51,6 +51,29 @@ test("rejects a path that is not a directory", async () => {
       { toolCallId: "call-1", messages: [], context: {} },
     ),
   ).rejects.toThrow();
+});
+
+test("uses the injected directory reader and keeps ignore and sorting", async () => {
+  const seen: string[] = [];
+  const executor = createLsExecutor(async (path) => {
+    seen.push(path);
+    return [
+      { name: "b.txt", kind: "file" as const },
+      { name: "a-dir", kind: "directory" as const },
+      { name: "notes.log", kind: "file" as const },
+    ];
+  });
+
+  await expect(
+    executor({ path: "/.skills", ignore: ["*.log"] }, { name: "LS", callId: "call-1" }),
+  ).resolves.toEqual({
+    type: "json",
+    payload: [
+      { name: "a-dir", type: "directory" },
+      { name: "b.txt", type: "file" },
+    ],
+  });
+  expect(seen).toEqual(["/.skills"]);
 });
 
 test("is the LS tool", () => {

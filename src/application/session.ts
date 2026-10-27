@@ -3,7 +3,8 @@ import type { ModelMessage } from "ai";
 import { AgentLoop } from "../agent/agent-loop.js";
 import { Context } from "../messages/context.js";
 import { Memory } from "../memory/memory.js";
-import { lsExecutor, lsTool } from "../tools/ls-tool.js";
+import type { SkillDirEntry } from "../skills/fs.js";
+import { createLsExecutor, lsExecutor, lsTool } from "../tools/ls-tool.js";
 import { createReadExecutor, readExecutor, readTool } from "../tools/read-tool.js";
 import {
   createTranslateExecutor,
@@ -40,11 +41,17 @@ export async function createSession(
 export type LoopIO = {
   read?: TranslateReader;
   write?: TranslateWriter;
+  ls?: (path: string) => Promise<readonly SkillDirEntry[]>;
+};
+
+export type LoopOptions = {
+  skillsPrompt?: string;
 };
 
 export async function createLoop(
   messages: readonly ModelMessage[] = [],
   io: LoopIO = {},
+  options: LoopOptions = {},
 ): Promise<AgentLoop> {
   const memory = new Memory();
   await memory.init();
@@ -56,13 +63,13 @@ export async function createLoop(
     },
     toolExecutors(io),
     messages,
-    { memory },
+    { memory, skillsPrompt: options.skillsPrompt },
   );
 }
 
 function toolExecutors(io: LoopIO = {}) {
   return {
-    LS: lsExecutor,
+    LS: io.ls ? createLsExecutor(io.ls) : lsExecutor,
     Read: io.read ? createReadExecutor(io.read) : readExecutor,
     Translate: createTranslateExecutor({
       writer: io.write ?? writeTranslation,

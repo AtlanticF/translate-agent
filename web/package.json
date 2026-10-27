@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "node scripts/bundle-agent.mjs && next dev",
+    "dev": "node scripts/sync-skills-bundle.mjs && node scripts/bundle-skills.mjs && node scripts/bundle-agent.mjs && next dev",
     "build": "node scripts/opennext.mjs build",
     "start": "next start",
     "preview": "node scripts/opennext.mjs build && node scripts/opennext.mjs preview",
@@ -11,6 +11,7 @@
     "upload": "node scripts/opennext.mjs build && node scripts/opennext.mjs upload",
     "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
     "db:migrate:local": "wrangler d1 migrations apply translate-agent --local",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint"
   },
   "dependencies": {
@@ -30,6 +31,7 @@
     "class-variance-authority": "^0.7.1",
     "cn": "^0.5.0",
     "drizzle-orm": "^0.45.4",
+    "jose": "^6.2.13",
     "lucide-react": "^1.60.0",
     "next": "16.4.2",
     "react": "19.3.0",

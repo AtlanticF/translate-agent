@@ -3,15 +3,18 @@ import { drizzle } from "drizzle-orm/d1";
 import { createSessionFileStore, type ObjectBucket, type SessionFileStore } from "./session-files";
 import { createSessionStore } from "./session-store";
 import * as schema from "./session-schema";
-import type { SessionStore } from "./session";
+import { SessionNotFoundError, type SessionStore } from "./session";
 
 export async function getSessionStore(): Promise<SessionStore> {
   const { sessions, files } = await openStores();
   return {
     ...sessions,
-    async delete(id) {
+    async delete(userId, id) {
+      if (!(await sessions.get(userId, id))) {
+        throw new SessionNotFoundError(id);
+      }
       await files.removeSession(id);
-      await sessions.delete(id);
+      await sessions.delete(userId, id);
     },
   };
 }

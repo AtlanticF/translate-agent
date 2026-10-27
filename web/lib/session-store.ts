@@ -1,6 +1,12 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
-import type { Session, SessionCreate, SessionPatch, SessionStore } from "./session";
+import {
+  SessionNotFoundError,
+  type Session,
+  type SessionCreate,
+  type SessionPatch,
+  type SessionStore,
+} from "./session";
 import { sessions } from "./session-schema";
 
 type SessionDatabase = BaseSQLiteDatabase<"sync" | "async", unknown, { sessions: typeof sessions }>;
@@ -12,10 +18,11 @@ export function createSessionStore(
   const now = options.now ?? (() => new Date());
 
   return {
-    async create(input: SessionCreate = {}) {
+    async create(userId, input: SessionCreate = {}) {
       const createdAt = now();
       const session: Session = {
         id: input.id ?? crypto.randomUUID(),
+        userId,
         messages: [...(input.messages ?? [])],
         copilotResponses: [...(input.copilotResponses ?? [])],
         createdAt,
@@ -25,20 +32,53 @@ export function createSessionStore(
       return copySession(session);
     },
 
-    async list() {
-      const rows = await db.select().from(sessions).orderBy(desc(sessions.updatedAt));
-      return rows.map(copySession);
-    },
-
-    async get(id) {
-      const row = await db.select().from(sessions).where(eq(sessions.id, id)).get();
+    async ensure(userId, input) {
+      const createdAt = now();
+      await db
+        .insert(sessions)
+        .values({
+          id: input.id,
+          userId,
+          messages: [...(input.messages ?? [])],
+          copilotResponses: [...(input.copilotResponses ?? [])],
+          createdAt,
+          updatedAt: createdAt,
+        })
+        .onConflictDoNothing();
+      const row = await db
+        .select()
+        .from(sessions)
+        .where(and(eq(sessions.id, input.id), eq(sessions.userId, userId)))
+        .get();
       return row ? copySession(row) : undefined;
     },
 
-    async update(id, patch: SessionPatch) {
-      const current = await db.select().from(sessions).where(eq(sessions.id, id)).get();
+    async list(userId) {
+      const rows = await db
+        .select()
+        .from(sessions)
+        .where(eq(sessions.userId, userId))
+        .orderBy(desc(sessions.updatedAt));
+      return rows.map(copySession);
+    },
+
+    async get(userId, id) {
+      const row = await db
+        .select()
+        .from(sessions)
+        .where(and(eq(sessions.id, id), eq(sessions.userId, userId)))
+        .get();
+      return row ? copySession(row) : undefined;
+    },
+
+    async update(userId, id, patch: SessionPatch) {
+      const current = await db
+        .select()
+        .from(sessions)
+        .where(and(eq(sessions.id, id), eq(sessions.userId, userId)))
+        .get();
       if (!current) {
-        throw new Error(`unknown session: ${id}`);
+        throw new SessionNotFoundError(id);
       }
       const session: Session = {
         ...copySession(current),
@@ -49,16 +89,25 @@ export function createSessionStore(
           : [...current.copilotResponses],
         updatedAt: now(),
       };
-      await db.update(sessions).set(session).where(eq(sessions.id, id));
+      await db
+        .update(sessions)
+        .set(session)
+        .where(and(eq(sessions.id, id), eq(sessions.userId, userId)));
       return copySession(session);
     },
 
-    async delete(id) {
-      const current = await db.select().from(sessions).where(eq(sessions.id, id)).get();
+    async delete(userId, id) {
+      const current = await db
+        .select()
+        .from(sessions)
+        .where(and(eq(sessions.id, id), eq(sessions.userId, userId)))
+        .get();
       if (!current) {
-        throw new Error(`unknown session: ${id}`);
+        throw new SessionNotFoundError(id);
       }
-      await db.delete(sessions).where(eq(sessions.id, id));
+      await db
+        .delete(sessions)
+        .where(and(eq(sessions.id, id), eq(sessions.userId, userId)));
     },
   };
 }
@@ -66,6 +115,7 @@ export function createSessionStore(
 function copySession(session: Session): Session {
   return {
     id: session.id,
+    userId: session.userId,
     messages: [...session.messages],
     copilotResponses: [...session.copilotResponses],
     createdAt: session.createdAt,

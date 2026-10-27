@@ -4,6 +4,7 @@ import type { ContextMessage } from "./session";
 
 export const sessions = sqliteTable("sessions", {
   id: text("id").primaryKey(),
+  userId: text("user_id"),
   messages: text("messages", { mode: "json" }).$type<ContextMessage[]>().notNull(),
   copilotResponses: text("copilot_responses", { mode: "json" })
     .$type<CopilotResponseEntry[]>()

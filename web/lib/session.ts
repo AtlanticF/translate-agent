@@ -4,6 +4,7 @@ export type ContextMessage = ReturnType<Context["getMessages"]>[number];
 
 export type Session = {
   id: string;
+  userId: string | null;
   messages: ContextMessage[];
   copilotResponses: CopilotResponseEntry[];
   createdAt: Date;
@@ -21,10 +22,18 @@ export type SessionPatch = {
   copilotResponses?: CopilotResponseEntry[];
 };
 
+export class SessionNotFoundError extends Error {
+  constructor(readonly sessionId: string) {
+    super(`unknown session: ${sessionId}`);
+    this.name = "SessionNotFoundError";
+  }
+}
+
 export interface SessionStore {
-  create(input?: SessionCreate): Promise<Session>;
-  list(): Promise<Session[]>;
-  get(id: string): Promise<Session | undefined>;
-  update(id: string, patch: SessionPatch): Promise<Session>;
-  delete(id: string): Promise<void>;
+  create(userId: string, input?: SessionCreate): Promise<Session>;
+  ensure(userId: string, input: SessionCreate & { id: string }): Promise<Session | undefined>;
+  list(userId: string): Promise<Session[]>;
+  get(userId: string, id: string): Promise<Session | undefined>;
+  update(userId: string, id: string, patch: SessionPatch): Promise<Session>;
+  delete(userId: string, id: string): Promise<void>;
 }

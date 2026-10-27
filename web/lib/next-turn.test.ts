@@ -11,22 +11,44 @@ const request: CopilotRequest = {
   tool: { name: "Translate", callId: "call-1" },
 };
 
+const userId = "user-a";
+
 test("returns 404 when the session id is unknown", async () => {
   const sessions = createSqliteSessionStore();
 
-  const result = await postNext({ sessionId: "missing" }, undefined, sessions, async () => {
+  const result = await postNext(userId, { sessionId: "missing" }, undefined, sessions, async () => {
     throw new Error("should not open an agent");
   });
 
   expect(result).toEqual({ status: 404, body: { error: "session not found" } });
 });
 
-test("restores a session and saves the finished step", async () => {
+test("returns 404 for another user's session without opening the agent", async () => {
   const sessions = createSqliteSessionStore();
-  const created = await sessions.create();
-  await sessions.update(created.id, { messages: [{ role: "user", content: "earlier" }] });
+  const created = await sessions.create("user-b");
 
   const result = await postNext(
+    userId,
+    { sessionId: created.id },
+    undefined,
+    sessions,
+    async () => {
+      throw new Error("should not open an agent");
+    },
+  );
+
+  expect(result).toEqual({ status: 404, body: { error: "session not found" } });
+});
+
+test("restores a session and saves the finished step", async () => {
+  const sessions = createSqliteSessionStore();
+  const created = await sessions.create(userId);
+  await sessions.update(userId, created.id, {
+    messages: [{ role: "user", content: "earlier" }],
+  });
+
+  const result = await postNext(
+    userId,
     { sessionId: created.id, userInput: "hello" },
     undefined,
     sessions,
@@ -56,7 +78,7 @@ test("restores a session and saves the finished step", async () => {
   );
 
   expect(result.status).toBe(200);
-  expect((await sessions.get(created.id))?.messages).toEqual([
+  expect((await sessions.get(userId, created.id))?.messages).toEqual([
     { role: "user", content: "earlier" },
     { role: "user", content: "hello" },
     { role: "assistant", content: "done" },
@@ -67,7 +89,7 @@ test("returns a single step, even when the agent still has work", async () => {
   const sessions = createSqliteSessionStore();
   let calls = 0;
 
-  const result = await postNext({}, undefined, sessions, async () => ({
+  const result = await postNext(userId, {}, undefined, sessions, async () => ({
     async userInput() {},
     addCopilotResponses() {},
     async next() {
@@ -92,15 +114,19 @@ test("returns a single step, even when the agent still has work", async () => {
     },
   });
   const sessionId = "sessionId" in result.body ? result.body.sessionId : "";
-  expect((await sessions.get(sessionId))?.messages).toEqual([{ role: "assistant", content: "draft" }]);
+  expect((await sessions.get(userId, sessionId))?.messages).toEqual([
+    { role: "assistant", content: "draft" },
+  ]);
+  expect(await sessions.get("user-b", sessionId)).toBeUndefined();
 });
 
 test("tells the agent which files were imported", async () => {
   const sessions = createSqliteSessionStore();
-  const created = await sessions.create();
+  const created = await sessions.create(userId);
   let userText = "";
 
   await postNext(
+    userId,
     { sessionId: created.id, userInput: "translate this" },
     undefined,
     sessions,
@@ -131,8 +157,8 @@ test("tells the agent which files were imported", async () => {
 
 test("drops finished files from the next message and from earlier context", async () => {
   const sessions = createSqliteSessionStore();
-  const created = await sessions.create();
-  await sessions.update(created.id, {
+  const created = await sessions.create(userId);
+  await sessions.update(userId, created.id, {
     messages: [
       {
         role: "user",
@@ -144,6 +170,7 @@ test("drops finished files from the next message and from earlier context", asyn
   const seen: string[] = [];
 
   await postNext(
+    userId,
     { sessionId: created.id, userInput: "what next" },
     undefined,
     sessions,
@@ -181,7 +208,7 @@ test("drops finished files from the next message and from earlier context", asyn
     "translate this\n\nImported files:\n/sessions/s/files/open/b.txt",
     "what next\n\nImported files:\n/sessions/s/files/open/b.txt",
   ]);
-  expect((await sessions.get(created.id))?.messages).toEqual([
+  expect((await sessions.get(userId, created.id))?.messages).toEqual([
     {
       role: "user",
       content: "translate this\n\nImported files:\n/sessions/s/files/open/b.txt",
@@ -192,8 +219,8 @@ test("drops finished files from the next message and from earlier context", asyn
 
 test("omits the file list once every imported file is finished", async () => {
   const sessions = createSqliteSessionStore();
-  const created = await sessions.create();
-  await sessions.update(created.id, {
+  const created = await sessions.create(userId);
+  await sessions.update(userId, created.id, {
     messages: [
       {
         role: "user",
@@ -204,6 +231,7 @@ test("omits the file list once every imported file is finished", async () => {
   let userText = "";
 
   await postNext(
+    userId,
     { sessionId: created.id, userInput: "thanks" },
     undefined,
     sessions,
@@ -232,7 +260,7 @@ test("omits the file list once every imported file is finished", async () => {
   );
 
   expect(userText).toBe("thanks");
-  expect((await sessions.get(created.id))?.messages[0]).toEqual({
+  expect((await sessions.get(userId, created.id))?.messages[0]).toEqual({
     role: "user",
     content: "translate this",
   });

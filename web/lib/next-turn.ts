@@ -38,13 +38,16 @@ export type ImportedFileList = {
 };
 
 export async function postNext(
+  userId: string,
   request: NextTurnRequest,
   signal: AbortSignal | undefined,
   sessions: SessionStore,
   openAgent: (messages: readonly ModelMessage[]) => Promise<TurnAgent> = openLoop,
   files?: ImportedFileList,
 ): Promise<NextTurnResponse> {
-  let session = request.sessionId ? await sessions.get(request.sessionId) : await sessions.create();
+  let session = request.sessionId
+    ? await sessions.get(userId, request.sessionId)
+    : await sessions.create(userId);
   if (!session) {
     return { status: 404, body: { error: "session not found" } };
   }
@@ -56,7 +59,7 @@ export async function postNext(
   if (userInput) {
     const pending = imported.filter((file) => file.status !== "done").map((file) => file.path);
     const messages: UserModelMessage[] = [{ role: "user", content: withImportedFiles(userInput, pending) }];
-    session = await sessions.update(session.id, {
+    session = await sessions.update(userId, session.id, {
       messages: [...session.messages, ...messages],
     });
     await agent.userInput(messages);
@@ -64,7 +67,7 @@ export async function postNext(
 
   const pendingResponses = request.copilotResponses ?? [];
   if (pendingResponses.length > 0) {
-    session = await sessions.update(session.id, {
+    session = await sessions.update(userId, session.id, {
       copilotResponses: [...session.copilotResponses, ...pendingResponses],
     });
     agent.addCopilotResponses(pendingResponses);
@@ -79,7 +82,7 @@ export async function postNext(
     after.filter((file) => file.status === "done").map((file) => file.path),
   );
   if (cleaned !== session.messages) {
-    await sessions.update(session.id, { messages: [...cleaned] });
+    await sessions.update(userId, session.id, { messages: [...cleaned] });
   }
   return {
     status: 200,

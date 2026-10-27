@@ -1,0 +1,8 @@
+{
+  "root": "/.skills",
+  "files": [
+    "/.skills/blog-translate/SKILL.md",
+    "/.skills/blog-translate/references/cultural-adaptation.md",
+    "/.skills/blog-translate/references/translation-rules.md"
+  ]
+}

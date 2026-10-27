@@ -1,5 +1,6 @@
 import { and, asc, eq } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
+import type { SessionStore } from "./session";
 import { sessionFiles } from "./session-schema";
 
 const maxFileBytes = 10 * 1024 * 1024;
@@ -182,6 +183,39 @@ export function createSessionFileStore(
 
 export function importedFilePath(sessionId: string, fileId: string, name: string): string {
   return `/sessions/${sessionId}/files/${fileId}/${safeFileName(name)}`;
+}
+
+export function ownedReadOriginalText(
+  sessions: SessionStore,
+  files: SessionFileStore,
+  userId: string,
+): (filePath: string) => Promise<string> {
+  return async (filePath) => {
+    await requireOwnedSession(sessions, userId, filePath);
+    return files.readOriginalText(filePath);
+  };
+}
+
+export function ownedAppendTranslated(
+  sessions: SessionStore,
+  files: SessionFileStore,
+  userId: string,
+): (filePath: string, translated: string, source?: SourceSpan) => Promise<void> {
+  return async (filePath, translated, source) => {
+    await requireOwnedSession(sessions, userId, filePath);
+    await files.appendTranslated(filePath, translated, source);
+  };
+}
+
+async function requireOwnedSession(
+  sessions: SessionStore,
+  userId: string,
+  filePath: string,
+): Promise<void> {
+  const parsed = parseImportedFilePath(filePath);
+  if (!parsed || !(await sessions.get(userId, parsed.sessionId))) {
+    throw new Error(`File not found: ${filePath}`);
+  }
 }
 
 export function parseImportedFilePath(

@@ -12,4 +12,5 @@ dist/
 .env.*
 *.log
 .DS_Store
-.skills
+web/lib/skills-bundle.js
+web/lib/skills-core.js

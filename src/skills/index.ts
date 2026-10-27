@@ -39,3 +39,5 @@ export { validateSkill } from "./validator.js";
 export type { ValidateSkill, ValidationResult } from "./validator.js";
 export { SKILL_ACTIVATION_POLICY, SKILLS_PROMPT_INSTRUCTIONS, buildSkillsPrompt } from "./prompt.js";
 export type { BuildSkillsPrompt } from "./prompt.js";
+export { createRepoSkillFs, parseRepoSkillsIndex } from "./repo-skill-fs.js";
+export type { RepoSkillReadFile, RepoSkillsIndex } from "./repo-skill-fs.js";

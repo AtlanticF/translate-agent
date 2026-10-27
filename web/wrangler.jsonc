@@ -29,7 +29,9 @@
 	"vars": {
 		"TRANSLATOR_MODEL": "z-ai/glm-4.5",
 		"MEMORY_MODEL": "qwen/qwen3.5-flash-02-23",
-		"COMPACT_MODEL": "qwen/qwen3.5-flash-02-23"
+		"COMPACT_MODEL": "qwen/qwen3.5-flash-02-23",
+		"ACCESS_TEAM_DOMAIN": "",
+		"ACCESS_AUD": ""
 	},
 	"d1_databases": [
 		{
@@ -49,7 +51,9 @@
 		"vars": {
 			"TRANSLATOR_MODEL": "z-ai/glm-4.5",
 			"MEMORY_MODEL": "qwen/qwen3.5-flash-02-23",
-			"COMPACT_MODEL": "qwen/qwen3.5-flash-02-23"
+			"COMPACT_MODEL": "qwen/qwen3.5-flash-02-23",
+			"ACCESS_TEAM_DOMAIN": "",
+			"ACCESS_AUD": ""
 		},
 		"d1_databases": [
 			{

@@ -6,6 +6,8 @@ import { saveUploadedFiles } from "./save-session-files";
 import { createSessionStore } from "./session-store";
 import {
   createSessionFileStore,
+  ownedAppendTranslated,
+  ownedReadOriginalText,
   type ObjectBucket,
   translatedDownloadName,
 } from "./session-files";
@@ -13,7 +15,7 @@ import * as schema from "./session-schema";
 
 test("stores an original copy and appends only approved translations", async () => {
   const { sessions, files, bucket } = openStore();
-  const session = await sessions.create({ id: "session-1" });
+  const session = await sessions.create("user-a", { id: "session-1" });
 
   const saved = await files.add(session.id, {
     name: "notes/readme.md",
@@ -74,8 +76,8 @@ test("keeps a file open when a paragraph is still untranslated", async () => {
 
 test("lists files for one session and removes them with the session", async () => {
   const { sessions, files, bucket } = openStore();
-  const first = await sessions.create({ id: "first" });
-  const second = await sessions.create({ id: "second" });
+  const first = await sessions.create("user-a", { id: "first" });
+  const second = await sessions.create("user-a", { id: "second" });
   await files.add(first.id, { name: "a.txt", mediaType: "text/plain", bytes: new Uint8Array([1]) });
   await files.add(second.id, { name: "b.txt", mediaType: "text/plain", bytes: new Uint8Array([2]) });
 
@@ -103,14 +105,61 @@ test("rejects a file larger than 10MB", async () => {
 test("creates a session when the first file is uploaded", async () => {
   const { sessions, files } = openStore();
 
-  const saved = await saveUploadedFiles(sessions, files, "new-session", [
+  const saved = await saveUploadedFiles(sessions, files, "user-a", "new-session", [
     { name: "a.txt", mediaType: "text/plain", bytes: new TextEncoder().encode("alpha") },
     { name: "b.txt", mediaType: "text/plain", bytes: new TextEncoder().encode("beta") },
   ]);
 
   expect(saved.sessionId).toBe("new-session");
   expect(saved.files.map((file) => file.name)).toEqual(["a.txt", "b.txt"]);
-  expect(await sessions.get("new-session")).toBeDefined();
+  expect(await sessions.get("user-a", "new-session")).toBeDefined();
+  expect(await sessions.get("user-b", "new-session")).toBeUndefined();
+});
+
+test("rejects uploads to another user's session", async () => {
+  const { sessions, files } = openStore();
+  await sessions.create("user-b", { id: "taken" });
+
+  await expect(
+    saveUploadedFiles(sessions, files, "user-a", "taken", [
+      { name: "a.txt", mediaType: "text/plain", bytes: new TextEncoder().encode("alpha") },
+    ]),
+  ).rejects.toThrow(/unknown session: taken/);
+
+  expect(await files.list("taken")).toEqual([]);
+  expect((await sessions.get("user-b", "taken"))?.messages).toEqual([]);
+});
+
+test("owned file access rejects another user's session", async () => {
+  const { sessions, files } = openStore();
+  await sessions.create("user-b", { id: "session-b" });
+  const saved = await files.add("session-b", {
+    name: "a.txt",
+    mediaType: "text/plain",
+    bytes: new TextEncoder().encode("hello"),
+  });
+  const read = ownedReadOriginalText(sessions, files, "user-a");
+  const append = ownedAppendTranslated(sessions, files, "user-a");
+
+  await expect(read(saved.path)).rejects.toThrow(`File not found: ${saved.path}`);
+  await expect(append(saved.path, "你好")).rejects.toThrow(`File not found: ${saved.path}`);
+  expect(await files.readTranslated("session-b", saved.id)).toBe("");
+});
+
+test("owned file access works for the session owner", async () => {
+  const { sessions, files } = openStore();
+  await sessions.create("user-a", { id: "session-a" });
+  const saved = await files.add("session-a", {
+    name: "a.txt",
+    mediaType: "text/plain",
+    bytes: new TextEncoder().encode("hello"),
+  });
+  const read = ownedReadOriginalText(sessions, files, "user-a");
+  const append = ownedAppendTranslated(sessions, files, "user-a");
+
+  expect(await read(saved.path)).toBe("hello");
+  await append(saved.path, "你好");
+  expect(await files.readTranslated("session-a", saved.id)).toBe("你好");
 });
 
 test("names the download after the original file", () => {
@@ -122,6 +171,7 @@ function openStore() {
   sqlite.exec(readFileSync(new URL("../drizzle/0000_sessions.sql", import.meta.url), "utf8"));
   sqlite.exec(readFileSync(new URL("../drizzle/0001_session_files.sql", import.meta.url), "utf8"));
   sqlite.exec(readFileSync(new URL("../drizzle/0002_session_file_progress.sql", import.meta.url), "utf8"));
+  sqlite.exec(readFileSync(new URL("../drizzle/0003_session_ownership.sql", import.meta.url), "utf8"));
   const db = drizzle(sqlite, { schema });
   const bucket = memoryBucket();
   return {

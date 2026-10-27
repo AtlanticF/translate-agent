@@ -2,6 +2,7 @@ import { readdir } from "node:fs/promises";
 import { isAbsolute, matchesGlob } from "node:path";
 import { tool, zodSchema } from "ai";
 import { z } from "zod";
+import type { SkillDirEntry } from "../skills/fs.js";
 import type { ToolExecutor } from "./executor.js";
 
 export type LsInput = {
@@ -36,25 +37,39 @@ const outputSchema = zodSchema(
   ),
 );
 
-export const lsExecutor: ToolExecutor<LsInput> = async (input) => {
-  if (!isAbsolute(input.path)) {
-    throw new Error("path must be an absolute path");
-  }
+export async function readLocalDir(path: string): Promise<readonly SkillDirEntry[]> {
+  const entries = await readdir(path, { withFileTypes: true });
+  return entries.map((entry) => ({
+    name: entry.name,
+    kind: entry.isDirectory() ? ("directory" as const) : ("file" as const),
+  }));
+}
 
-  const entries = await readdir(input.path, { withFileTypes: true });
-  const ignore = input.ignore ?? [];
+export function createLsExecutor(
+  readDir: (path: string) => Promise<readonly SkillDirEntry[]> = readLocalDir,
+): ToolExecutor<LsInput> {
+  return async (input) => {
+    if (!isAbsolute(input.path)) {
+      throw new Error("path must be an absolute path");
+    }
 
-  return {
-    type: "json",
-    payload: entries
-      .filter((entry) => !isIgnored(entry.name, ignore))
-      .map((entry) => ({
-        name: entry.name,
-        type: entry.isDirectory() ? ("directory" as const) : ("file" as const),
-      }))
-      .sort((left, right) => left.name.localeCompare(right.name)),
+    const entries = await readDir(input.path);
+    const ignore = input.ignore ?? [];
+
+    return {
+      type: "json",
+      payload: entries
+        .filter((entry) => !isIgnored(entry.name, ignore))
+        .map((entry) => ({
+          name: entry.name,
+          type: entry.kind,
+        }))
+        .sort((left, right) => left.name.localeCompare(right.name)),
+    };
   };
-};
+}
+
+export const lsExecutor = createLsExecutor();
 
 export const lsTool = Object.assign(
   tool({

@@ -1,9 +1,14 @@
+import { requireUserId } from "../../../lib/request-auth";
 import { getSessionFileStore, getSessionStore } from "../../../lib/session-cloudflare";
 
-export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+  const auth = await requireUserId(request);
+  if ("response" in auth) {
+    return auth.response;
+  }
   const { id } = await context.params;
   const sessions = await getSessionStore();
-  const session = await sessions.get(id);
+  const session = await sessions.get(auth.userId, id);
   if (!session) {
     return Response.json({ error: "session not found" }, { status: 404 });
   }

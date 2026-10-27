@@ -1,15 +1,16 @@
 import type { SessionFile, SessionFileStore } from "./session-files";
-import type { SessionStore } from "./session";
+import { SessionNotFoundError, type SessionStore } from "./session";
 
 export async function saveUploadedFiles(
   sessions: SessionStore,
   files: SessionFileStore,
+  userId: string,
   sessionId: string,
   uploads: { name: string; mediaType: string; bytes: Uint8Array }[],
 ): Promise<{ sessionId: string; files: SessionFile[] }> {
-  const existing = await sessions.get(sessionId);
-  if (!existing) {
-    await sessions.create({ id: sessionId });
+  const session = await sessions.ensure(userId, { id: sessionId });
+  if (!session) {
+    throw new SessionNotFoundError(sessionId);
   }
   for (const upload of uploads) {
     await files.add(sessionId, upload);
