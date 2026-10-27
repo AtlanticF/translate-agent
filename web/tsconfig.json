@@ -28,6 +28,7 @@
       "@opentelemetry/api": ["./node_modules/@opentelemetry/api"],
       "@opentelemetry/context-async-hooks": ["./node_modules/@opentelemetry/context-async-hooks"],
       "@opentelemetry/sdk-trace-base": ["./node_modules/@opentelemetry/sdk-trace-base"],
+      "yaml": ["./node_modules/yaml"],
       "zod": ["./node_modules/zod"]
     }
   },
