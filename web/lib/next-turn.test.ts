@@ -1,7 +1,8 @@
+import { APICallError, RetryError } from "ai";
 import { expect, test } from "vitest";
 import type { AgentLoopNext } from "../../src/agent/agent-loop";
 import type { CopilotRequest } from "../../src/prompts/system.memory";
-import { postNext } from "./next-turn";
+import { describeModelError, postNext } from "./next-turn";
 import { createSqliteSessionStore } from "./session-sqlite";
 
 const request: CopilotRequest = {
@@ -83,6 +84,47 @@ test("restores a session and saves the finished step", async () => {
     { role: "user", content: "hello" },
     { role: "assistant", content: "done" },
   ]);
+});
+
+test("returns the upstream model error instead of throwing", async () => {
+  const sessions = createSqliteSessionStore();
+
+  const result = await postNext(userId, {}, undefined, sessions, async () => ({
+    async userInput() {},
+    addCopilotResponses() {},
+    async next() {
+      throw new APICallError({
+        message: "",
+        url: "https://openrouter.ai/api/v1/chat/completions",
+        requestBodyValues: {},
+        statusCode: 401,
+        responseBody: '{"error":{"message":"API key expired."}}',
+      });
+    },
+  }));
+
+  expect(result).toEqual({
+    status: 502,
+    body: {
+      error: 'model request failed (HTTP 401): {"error":{"message":"API key expired."}}',
+    },
+  });
+});
+
+test("unwraps retry errors to the last API error", () => {
+  const apiError = new APICallError({
+    message: "rate limited",
+    url: "https://openrouter.ai/api/v1/chat/completions",
+    requestBodyValues: {},
+    statusCode: 429,
+  });
+  const retryError = new RetryError({
+    message: "failed after 3 attempts",
+    reason: "maxRetriesExceeded",
+    errors: [apiError],
+  });
+
+  expect(describeModelError(retryError)).toBe("model request failed (HTTP 429): rate limited");
 });
 
 test("returns a single step, even when the agent still has work", async () => {

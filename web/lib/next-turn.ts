@@ -1,4 +1,4 @@
-import type { ModelMessage, UserModelMessage } from "ai";
+import { APICallError, RetryError, type ModelMessage, type UserModelMessage } from "ai";
 import type { AgentLoopNext } from "../../src/agent/agent-loop";
 import type { CopilotResponseEntry } from "../../src/messages/context";
 import { withTrace } from "../../src/observability/langfuse";
@@ -73,7 +73,14 @@ export async function postNext(
     agent.addCopilotResponses(pendingResponses);
   }
 
-  const step = await withTrace("web", session.id, () => agent.next(signal));
+  let step: AgentLoopNext;
+  try {
+    step = await withTrace("web", session.id, () => agent.next(signal));
+  } catch (error) {
+    const detail = describeModelError(error);
+    console.error("next turn failed:", detail);
+    return { status: 502, body: { error: detail } };
+  }
   const after = files ? await files.list(session.id) : [];
   const stored =
     step.messages.length > 0 ? [...session.messages, ...step.messages] : session.messages;
@@ -88,6 +95,26 @@ export async function postNext(
     status: 200,
     body: { sessionId: session.id, agentResponse: step, files: fileList(after) },
   };
+}
+
+export function describeModelError(error: unknown): string {
+  const api = findApiCallError(error);
+  if (!api) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  const status = api.statusCode ? ` (HTTP ${api.statusCode})` : "";
+  const detail = api.responseBody?.replace(/\s+/g, " ").trim().slice(0, 500) || api.message;
+  return `model request failed${status}: ${detail}`;
+}
+
+function findApiCallError(error: unknown): APICallError | undefined {
+  if (APICallError.isInstance(error)) {
+    return error;
+  }
+  if (RetryError.isInstance(error) && APICallError.isInstance(error.lastError)) {
+    return error.lastError;
+  }
+  return undefined;
 }
 
 function fileList(
