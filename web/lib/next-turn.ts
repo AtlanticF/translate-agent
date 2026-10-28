@@ -42,7 +42,7 @@ export async function postNext(
   request: NextTurnRequest,
   signal: AbortSignal | undefined,
   sessions: SessionStore,
-  openAgent: (messages: readonly ModelMessage[]) => Promise<TurnAgent> = openLoop,
+  openAgent: (messages: readonly ModelMessage[], sessionId: string) => Promise<TurnAgent> = openLoop,
   files?: ImportedFileList,
 ): Promise<NextTurnResponse> {
   let session = request.sessionId
@@ -54,7 +54,7 @@ export async function postNext(
 
   const imported = files ? await files.list(session.id) : [];
   const donePaths = imported.filter((file) => file.status === "done").map((file) => file.path);
-  const agent = await openAgent(omitDoneFilePaths(session.messages, donePaths));
+  const agent = await openAgent(omitDoneFilePaths(session.messages, donePaths), session.id);
   const userInput = request.userInput?.trim();
   if (userInput) {
     const pending = imported.filter((file) => file.status !== "done").map((file) => file.path);

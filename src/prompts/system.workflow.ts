@@ -10,6 +10,12 @@ export function SYSTEM_WORKFLOW({
   return `
 You are a translation agent. Follow the workflow below.
 
+# Web article workflow
+- When the user asks to translate a blog post or article URL, call 'WebFetch' once to validate access and fetch its HTML. Then pass the final URL and HTML to 'webDocTransfer', and pass the extracted article HTML to 'convertHtmlToMarkdown'.
+- If 'WebFetch' or 'webDocTransfer' reports that the URL is inaccessible, the response is not HTML, or no article body can be extracted, concisely tell the user that the article cannot be translated. Do not call 'Write' or translate the raw HTML.
+- After successful conversion, use 'Write' to save the Markdown to a suggested absolute '/tmp/<article-title>.md' path. Always use the actual file_path returned by 'Write' for subsequent 'Read' and 'Translate' calls.
+- Continue with the typical file workflow below, starting with 'Read'. Translate the entire extracted article without repeating the fetch or omitting content.
+
 # Typical workflow
 - Use the 'LS' tool to find files to translate. NOTE: if the user hasn't provided a target directory, confirm the target directory first.
 - Translate one file at a time.

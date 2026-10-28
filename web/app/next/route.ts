@@ -34,7 +34,8 @@ export async function POST(request: Request) {
     body,
     request.signal,
     sessions,
-    (messages) => openLoop(messages, { sessions, files, userId: auth.userId, skills }),
+    (messages, sessionId) =>
+      openLoop(messages, { sessions, files, userId: auth.userId, sessionId, skills }),
     files,
   );
   return Response.json(result.body, { status: result.status });
@@ -51,6 +52,7 @@ async function openLoop(
     sessions: SessionStore;
     files: SessionFileStore;
     userId: string;
+    sessionId: string;
     skills: LoadedSkills;
   },
 ) {
@@ -69,6 +71,14 @@ async function openLoop(
           start: source_start,
           end: source_end,
         });
+      },
+      writeFile: async ({ file_path, content }) => {
+        const saved = await context.files.add(context.sessionId, {
+          name: path.basename(file_path) || "article.md",
+          mediaType: "text/markdown",
+          bytes: new TextEncoder().encode(content),
+        });
+        return { file_path: saved.path };
       },
       ls: (dirPath) =>
         isSkillsPath(dirPath)

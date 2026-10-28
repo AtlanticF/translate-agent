@@ -124,3 +124,48 @@ test("appends an approved paragraph without changing the imported source", async
   expect(source).toBe("before hello after");
   expect(translated).toEqual(["你好"]);
 });
+
+test("routes Write through the injected file writer", async () => {
+  let written: { file_path: string; content: string } | undefined;
+  const loop = await createLoop(
+    [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call-1",
+            toolName: "Write",
+            input: { file_path: "/tmp/article.md", content: "# Article" },
+          },
+        ],
+      },
+    ],
+    {
+      writeFile: async (input) => {
+        written = input;
+        return { file_path: "/sessions/s/files/f/article.md" };
+      },
+    },
+  );
+
+  const result = await loop.next();
+
+  expect(written).toEqual({ file_path: "/tmp/article.md", content: "# Article" });
+  expect(result.messages).toEqual([
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "call-1",
+          toolName: "Write",
+          output: {
+            type: "json",
+            value: { file_path: "/sessions/s/files/f/article.md" },
+          },
+        },
+      ],
+    },
+  ]);
+});

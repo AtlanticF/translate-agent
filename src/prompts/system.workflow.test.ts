@@ -16,6 +16,21 @@ test("describes the translation workflow without preferences when memory is empt
   expect(prompt).not.toContain(SKILL_ACTIVATION_POLICY);
 });
 
+test("describes the web article workflow and its failure boundary", () => {
+  const prompt = SYSTEM_WORKFLOW({ currentMemory: "" });
+
+  expect(prompt).toContain("call 'WebFetch' once to validate access and fetch its HTML");
+  expect(prompt).toContain("pass the final URL and HTML to 'webDocTransfer'");
+  expect(prompt).toContain("pass the extracted article HTML to 'convertHtmlToMarkdown'");
+  expect(prompt).toContain("Do not call 'Write' or translate the raw HTML");
+  expect(prompt).toContain("Always use the actual file_path returned by 'Write'");
+  expect(prompt).toContain("starting with 'Read'");
+  expect(prompt.indexOf("'WebFetch'")).toBeLessThan(prompt.indexOf("'webDocTransfer'"));
+  expect(prompt.indexOf("'webDocTransfer'")).toBeLessThan(
+    prompt.indexOf("'convertHtmlToMarkdown'"),
+  );
+});
+
 test("omits skills when the skills prompt is blank", () => {
   const prompt = SYSTEM_WORKFLOW({ currentMemory: "", skillsPrompt: "  \n" });
 

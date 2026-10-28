@@ -47,13 +47,15 @@ test("restores a session and saves the finished step", async () => {
   await sessions.update(userId, created.id, {
     messages: [{ role: "user", content: "earlier" }],
   });
+  let openedSessionId = "";
 
   const result = await postNext(
     userId,
     { sessionId: created.id, userInput: "hello" },
     undefined,
     sessions,
-    async (messages) => {
+    async (messages, sessionId) => {
+      openedSessionId = sessionId;
       const stored = [...messages];
       return {
         async userInput(next) {
@@ -79,6 +81,7 @@ test("restores a session and saves the finished step", async () => {
   );
 
   expect(result.status).toBe(200);
+  expect(openedSessionId).toBe(created.id);
   expect((await sessions.get(userId, created.id))?.messages).toEqual([
     { role: "user", content: "earlier" },
     { role: "user", content: "hello" },
