@@ -103,6 +103,32 @@ export default function Home() {
     setError(undefined);
   }
 
+  async function renameSession(id: string, title: string) {
+    setError(undefined);
+    try {
+      const response = await fetch(`/sessions/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title }),
+      });
+      const payload = (await response.json().catch(() => undefined)) as
+        | SessionSummary
+        | { error?: string }
+        | undefined;
+      if (!response.ok || !payload || !("title" in payload)) {
+        const message = payload && "error" in payload ? payload.error : undefined;
+        throw new Error(message || "request failed");
+      }
+      setSessions((current) =>
+        current
+          .map((session) => (session.id === payload.id ? { ...session, ...payload } : session))
+          .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)),
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  }
+
   async function deleteSession() {
     const target = deleteTarget;
     if (!target || deleting) {
@@ -210,6 +236,7 @@ export default function Home() {
         disabled={busy}
         onNew={newSession}
         onSelect={(id) => void openSession(id)}
+        onRename={(id, title) => void renameSession(id, title)}
         onDelete={setDeleteTarget}
       />
       <div className="flex min-w-0 flex-1 flex-col">

@@ -8,6 +8,7 @@ import {
   type SessionStore,
 } from "./session";
 import { sessions } from "./session-schema";
+import { normalizeSessionTitle } from "./session-title";
 
 type SessionDatabase = BaseSQLiteDatabase<"sync" | "async", unknown, { sessions: typeof sessions }>;
 
@@ -23,6 +24,7 @@ export function createSessionStore(
       const session: Session = {
         id: input.id ?? crypto.randomUUID(),
         userId,
+        title: normalizeSessionTitle(input.title),
         messages: [...(input.messages ?? [])],
         copilotResponses: [...(input.copilotResponses ?? [])],
         createdAt,
@@ -39,6 +41,7 @@ export function createSessionStore(
         .values({
           id: input.id,
           userId,
+          title: normalizeSessionTitle(input.title),
           messages: [...(input.messages ?? [])],
           copilotResponses: [...(input.copilotResponses ?? [])],
           createdAt,
@@ -87,6 +90,8 @@ export function createSessionStore(
         copilotResponses: patch.copilotResponses
           ? [...patch.copilotResponses]
           : [...current.copilotResponses],
+        title:
+          patch.title === undefined ? (current.title ?? null) : normalizeSessionTitle(patch.title),
         updatedAt: now(),
       };
       await db
@@ -116,6 +121,7 @@ function copySession(session: Session): Session {
   return {
     id: session.id,
     userId: session.userId,
+    title: session.title ?? null,
     messages: [...session.messages],
     copilotResponses: [...session.copilotResponses],
     createdAt: session.createdAt,

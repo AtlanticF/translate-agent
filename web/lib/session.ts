@@ -5,6 +5,7 @@ export type ContextMessage = ReturnType<Context["getMessages"]>[number];
 export type Session = {
   id: string;
   userId: string | null;
+  title: string | null;
   messages: ContextMessage[];
   copilotResponses: CopilotResponseEntry[];
   createdAt: Date;
@@ -13,11 +14,13 @@ export type Session = {
 
 export type SessionCreate = {
   id?: string;
+  title?: string | null;
   messages?: ContextMessage[];
   copilotResponses?: CopilotResponseEntry[];
 };
 
 export type SessionPatch = {
+  title?: string | null;
   messages?: ContextMessage[];
   copilotResponses?: CopilotResponseEntry[];
 };

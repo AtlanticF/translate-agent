@@ -13,6 +13,7 @@ test("creates a session owned by the user with timestamps and empty messages", a
 
   expect(session.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
   expect(session.userId).toBe("user-a");
+  expect(session.title).toBeNull();
   expect(session.messages).toEqual([]);
   expect(session.copilotResponses).toEqual([]);
   expect(session.createdAt).toEqual(now);
@@ -49,6 +50,24 @@ test("updates messages without letting callers change the stored copy", async ()
   expect((await sessions.get("user-a", session.id))?.updatedAt.getTime()).toBeGreaterThanOrEqual(
     session.createdAt.getTime(),
   );
+});
+
+test("renames a session without dropping its messages", async () => {
+  const sessions = createSqliteSessionStore();
+  const session = await sessions.create("user-a");
+  const message = { role: "user" as const, content: "hello" };
+  await sessions.update("user-a", session.id, { messages: [message] });
+
+  const renamed = await sessions.update("user-a", session.id, { title: "  Notes  " });
+  expect(renamed.title).toBe("Notes");
+  expect(renamed.messages).toEqual([message]);
+
+  await sessions.update("user-a", session.id, { messages: [{ role: "user", content: "later" }] });
+  expect((await sessions.get("user-a", session.id))?.title).toBe("Notes");
+
+  const cleared = await sessions.update("user-a", session.id, { title: "   " });
+  expect(cleared.title).toBeNull();
+  expect(cleared.messages).toEqual([{ role: "user", content: "later" }]);
 });
 
 test("stores copilot responses on the session", async () => {
@@ -115,6 +134,7 @@ function openLegacyStore() {
     "0001_session_files.sql",
     "0002_session_file_progress.sql",
     "0003_session_ownership.sql",
+    "0004_session_title.sql",
   ]) {
     sqlite.exec(readFileSync(new URL(`../drizzle/${migration}`, import.meta.url), "utf8"));
   }

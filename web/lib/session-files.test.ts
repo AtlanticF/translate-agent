@@ -172,6 +172,7 @@ function openStore() {
   sqlite.exec(readFileSync(new URL("../drizzle/0001_session_files.sql", import.meta.url), "utf8"));
   sqlite.exec(readFileSync(new URL("../drizzle/0002_session_file_progress.sql", import.meta.url), "utf8"));
   sqlite.exec(readFileSync(new URL("../drizzle/0003_session_ownership.sql", import.meta.url), "utf8"));
+  sqlite.exec(readFileSync(new URL("../drizzle/0004_session_title.sql", import.meta.url), "utf8"));
   const db = drizzle(sqlite, { schema });
   const bucket = memoryBucket();
   return {
