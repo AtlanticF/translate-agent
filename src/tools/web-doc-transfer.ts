@@ -3,55 +3,78 @@ import { parseHTML } from "linkedom";
 import { tool, zodSchema } from "ai";
 import { z } from "zod";
 import type { ToolExecutor } from "./executor.js";
+import { localWebFileIO, safeWebFileName, type WebFileIO } from "./web-io.js";
 
 export type WebDocTransferInput = {
   url: string;
-  html: string;
+  file_path: string;
 };
 
 export type WebDocTransferOutput = {
   title: string;
-  html: string;
+  file_path: string;
+  bytes: number;
+  preview: string;
 };
 
-const description = `Extract the main article from an HTML document with Readability.
+const previewLength = 200;
 
-Pass the final article URL and the HTML returned by WebFetch. This tool removes navigation and other non-article content and returns clean article HTML. It does not fetch URLs or convert HTML to Markdown.`;
+const description = `Extract the main article from a saved HTML document with Readability.
+
+Pass the final article URL and the file_path returned by WebFetch (never the HTML contents). This tool reads the saved raw HTML, removes navigation and other non-article content, saves the clean article HTML server-side, and returns its file_path plus a short preview. It does not fetch URLs or convert HTML to Markdown.`;
 
 const inputSchema = zodSchema(
   z.object({
     url: z.string().describe("Final article URL used to resolve relative links."),
-    html: z.string().describe("Raw HTML returned by WebFetch."),
+    file_path: z.string().describe("file_path of the raw HTML returned by WebFetch."),
   }),
 );
 
 const outputSchema = zodSchema(
   z.object({
     title: z.string().describe("Extracted article title."),
-    html: z.string().describe("Clean HTML containing only the extracted article body."),
+    file_path: z.string().describe("Server-side path of the clean article HTML. Pass this to convertHtmlToMarkdown."),
+    bytes: z.number().describe("Size of the clean HTML in bytes."),
+    preview: z.string().describe("First characters of the article text, for a quick sanity check."),
   }),
 );
 
-export const webDocTransferExecutor: ToolExecutor<WebDocTransferInput> = async (input) => {
-  const url = parseHttpUrl(input.url);
-  const { document } = parseHTML(input.html);
-  const base = document.createElement("base");
-  base.setAttribute("href", url.href);
-  document.head?.appendChild(base);
+export function createWebDocTransferExecutor(
+  io: WebFileIO = localWebFileIO,
+): ToolExecutor<WebDocTransferInput> {
+  return async (input) => {
+    const url = parseHttpUrl(input.url);
+    const html = await io.read(input.file_path);
+    const { document } = parseHTML(html);
+    const base = document.createElement("base");
+    base.setAttribute("href", url.href);
+    document.head?.appendChild(base);
 
-  const article = new Readability(document as unknown as Document).parse();
-  if (!article?.content || !article.textContent?.trim()) {
-    throw new Error("Unable to extract an article from the HTML document");
-  }
+    const article = new Readability(document as unknown as Document).parse();
+    if (!article?.content || !article.textContent?.trim()) {
+      throw new Error("Unable to extract an article from the HTML document");
+    }
 
-  return {
-    type: "json",
-    payload: {
-      title: article.title?.trim() || "Untitled article",
-      html: article.content,
-    },
+    const title = article.title?.trim() || "Untitled article";
+    const saved = await io.save({
+      name: `${safeWebFileName(title)}.article.html`,
+      mediaType: "text/html",
+      content: article.content,
+    });
+
+    return {
+      type: "json",
+      payload: {
+        title,
+        file_path: saved.file_path,
+        bytes: article.content.length,
+        preview: (article.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, previewLength),
+      },
+    };
   };
-};
+}
+
+export const webDocTransferExecutor = createWebDocTransferExecutor();
 
 export const webDocTransferTool = Object.assign(
   tool({

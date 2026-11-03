@@ -1,10 +1,10 @@
-import { generateText, type ModelMessage } from "ai";
+import { streamText, type ModelMessage } from "ai";
 import { beforeEach, expect, test, vi } from "vitest";
 import { Context } from "../messages/context.js";
 import type { CopilotRequest } from "../prompts/system.memory.js";
 import type { ToolExecutor } from "../tools/executor.js";
 import { lsTool } from "../tools/ls-tool.js";
-import { AgentLoop } from "./agent-loop.js";
+import { AgentLoop, type AgentLoopEvent } from "./agent-loop.js";
 
 vi.mock("../ai/llm.js", () => ({
   models: {
@@ -16,15 +16,17 @@ vi.mock("ai", async (importOriginal) => {
   const actual = await importOriginal<typeof import("ai")>();
   return {
     ...actual,
-    generateText: vi.fn(),
+    streamText: vi.fn(),
   };
 });
 
-const generateTextMock = vi.mocked(generateText);
+const streamTextMock = vi.mocked(streamText);
 
 beforeEach(() => {
-  generateTextMock.mockReset();
+  streamTextMock.mockReset();
 });
+
+async function* emptyStream() {}
 
 test("restores the loop from messages", async () => {
   const messages = [{ role: "user" as const, content: "hello" }];
@@ -46,12 +48,13 @@ test("asks the user when the context is empty", async () => {
     messages: [],
     finishReason: undefined,
   });
-  expect(generateTextMock).not.toHaveBeenCalled();
+  expect(streamTextMock).not.toHaveBeenCalled();
   await expect(loop.getMessages()).resolves.toEqual([]);
 });
 
 test("stores user messages and returns the model reply", async () => {
-  generateTextMock.mockResolvedValue({
+  streamTextMock.mockReturnValue({
+    stream: emptyStream(),
     toolCalls: [],
     finishReason: "stop",
     finalStep: {
@@ -59,14 +62,14 @@ test("stores user messages and returns the model reply", async () => {
         messages: [{ role: "assistant", content: "done" }],
       },
     },
-  } as unknown as Awaited<ReturnType<typeof generateText>>);
+  } as unknown as Awaited<ReturnType<typeof streamText>>);
 
   const context = new Context();
   const loop = new AgentLoop({}, {}, context);
   const user = { role: "user" as const, content: "translate README" };
 
   await loop.userInput([user]);
-  expect(generateTextMock).not.toHaveBeenCalled();
+  expect(streamTextMock).not.toHaveBeenCalled();
   await expect(loop.getMessages()).resolves.toEqual([user]);
 
   const result = await loop.next();
@@ -79,7 +82,7 @@ test("stores user messages and returns the model reply", async () => {
     user,
     { role: "assistant", content: "done" },
   ]);
-  expect(generateTextMock).toHaveBeenCalledWith(
+  expect(streamTextMock).toHaveBeenCalledWith(
     expect.objectContaining({
       system: expect.stringContaining("You are a translation agent."),
       messages: [user],
@@ -88,9 +91,37 @@ test("stores user messages and returns the model reply", async () => {
   );
 });
 
+test("emits transient model events and returns the same finished step", async () => {
+  streamTextMock.mockReturnValue({
+    stream: (async function* () {
+      yield { type: "text-delta", id: "text-1", text: "do" };
+      yield { type: "text-delta", id: "text-1", text: "ne" };
+      yield { type: "tool-input-start", id: "model-1", toolName: "Read" };
+    })(),
+    toolCalls: [],
+    finishReason: "stop",
+    finalStep: {
+      response: {
+        messages: [{ role: "assistant", content: "done" }],
+      },
+    },
+  } as unknown as Awaited<ReturnType<typeof streamText>>);
+  const events: AgentLoopEvent[] = [];
+  const loop = new AgentLoop({}, {}, new Context([{ role: "user", content: "go" }]));
+
+  const result = await loop.next(undefined, (event) => events.push(event));
+
+  expect(events).toEqual([
+    { type: "text-delta", delta: "do" },
+    { type: "text-delta", delta: "ne" },
+    { type: "activity", id: "model-1", kind: "tool", name: "Read", state: "preparing" },
+  ]);
+  expect(result.messages).toEqual([{ role: "assistant", content: "done" }]);
+});
+
 test("stops the model call when the signal is aborted", async () => {
   const signal = new AbortController();
-  generateTextMock.mockImplementation(async () => {
+  streamTextMock.mockImplementation(() => {
     signal.abort();
     throw new Error("aborted");
   });
@@ -102,20 +133,32 @@ test("stops the model call when the signal is aborted", async () => {
     messages: [],
     copilotRequests: [],
   });
-  expect(generateTextMock).toHaveBeenCalledWith(
+  expect(streamTextMock).toHaveBeenCalledWith(
     expect.objectContaining({ abortSignal: signal.signal }),
   );
   await expect(loop.getMessages()).resolves.toEqual([{ role: "user", content: "translate" }]);
 });
 
+test("preserves errors emitted inside the model stream", async () => {
+  streamTextMock.mockReturnValue({
+    stream: (async function* () {
+      yield { type: "error", error: new Error("upstream expired") };
+    })(),
+  } as unknown as Awaited<ReturnType<typeof streamText>>);
+  const loop = new AgentLoop({}, {}, new Context([{ role: "user", content: "go" }]));
+
+  await expect(loop.next()).rejects.toThrow("upstream expired");
+});
+
 test("sends saved preferences to the translator", async () => {
-  generateTextMock.mockResolvedValue({
+  streamTextMock.mockReturnValue({
+    stream: emptyStream(),
     toolCalls: [],
     finishReason: "stop",
     finalStep: {
       response: { messages: [{ role: "assistant", content: "done" }] },
     },
-  } as unknown as Awaited<ReturnType<typeof generateText>>);
+  } as unknown as Awaited<ReturnType<typeof streamText>>);
   const loop = new AgentLoop({}, {}, new Context([{ role: "user", content: "go" }]), {
     memory: {
       provideMemory: () => "Use 您. (style)",
@@ -125,7 +168,7 @@ test("sends saved preferences to the translator", async () => {
 
   await loop.next();
 
-  expect(generateTextMock).toHaveBeenCalledWith(
+  expect(streamTextMock).toHaveBeenCalledWith(
     expect.objectContaining({
       system: expect.stringContaining("Use 您. (style)"),
     }),
@@ -133,13 +176,14 @@ test("sends saved preferences to the translator", async () => {
 });
 
 test("sends the skills catalog and activation policy to the translator", async () => {
-  generateTextMock.mockResolvedValue({
+  streamTextMock.mockReturnValue({
+    stream: emptyStream(),
     toolCalls: [],
     finishReason: "stop",
     finalStep: {
       response: { messages: [{ role: "assistant", content: "done" }] },
     },
-  } as unknown as Awaited<ReturnType<typeof generateText>>);
+  } as unknown as Awaited<ReturnType<typeof streamText>>);
   const skillsPrompt = "<available_skills><skill><name>pdf-processing</name></skill></available_skills>";
   const loop = new AgentLoop({}, {}, new Context([{ role: "user", content: "go" }]), {
     skillsPrompt,
@@ -147,35 +191,89 @@ test("sends the skills catalog and activation policy to the translator", async (
 
   await loop.next();
 
-  expect(generateTextMock).toHaveBeenCalledWith(
+  expect(streamTextMock).toHaveBeenCalledWith(
     expect.objectContaining({
       system: expect.stringContaining(skillsPrompt),
     }),
   );
-  expect(generateTextMock).toHaveBeenCalledWith(
+  expect(streamTextMock).toHaveBeenCalledWith(
     expect.objectContaining({
       system: expect.stringContaining("Always start by reading the skill location file"),
     }),
   );
 });
 
-test("returns the user when the model response has no messages", async () => {
-  generateTextMock.mockResolvedValue({
-    toolCalls: [{ toolCallId: "call-1", toolName: "LS", input: { path: "." } }],
-    finishReason: "length",
-    finalStep: { response: { messages: [] } },
-  } as unknown as Awaited<ReturnType<typeof generateText>>);
+test("retries a reasoning-only model response before returning to the user", async () => {
+  const reasoningOnly = {
+    stream: emptyStream(),
+    toolCalls: [],
+    finishReason: "stop",
+    finalStep: {
+      response: {
+        messages: [
+          { role: "assistant", content: [{ type: "reasoning", text: "let me extract the article" }] },
+        ],
+      },
+    },
+  } as unknown as Awaited<ReturnType<typeof streamText>>;
+  const recovered = {
+    stream: emptyStream(),
+    toolCalls: [],
+    finishReason: "stop",
+    finalStep: { response: { messages: [{ role: "assistant", content: "done" }] } },
+  } as unknown as Awaited<ReturnType<typeof streamText>>;
+  streamTextMock.mockReturnValueOnce(reasoningOnly).mockReturnValueOnce(recovered);
 
   const loop = new AgentLoop({}, {}, new Context([{ role: "user", content: "go" }]));
   const result = await loop.next();
 
+  expect(streamTextMock).toHaveBeenCalledTimes(2);
   expect(result.nextActor).toBe("user");
-  expect(result.finishReason).toBe("length");
-  expect(result.messages).toEqual([]);
+  expect(result.messages).toEqual([{ role: "assistant", content: "done" }]);
+  // 空响应不写入上下文，重试仍然基于原始输入。
+  await expect(loop.getMessages()).resolves.toEqual([
+    { role: "user", content: "go" },
+    { role: "assistant", content: "done" },
+  ]);
+});
+
+test("rejects when the model keeps returning only reasoning", async () => {
+  streamTextMock.mockReturnValue({
+    stream: emptyStream(),
+    toolCalls: [],
+    finishReason: "stop",
+    finalStep: {
+      response: {
+        messages: [{ role: "assistant", content: [{ type: "reasoning", text: "thinking" }] }],
+      },
+    },
+  } as unknown as Awaited<ReturnType<typeof streamText>>);
+
+  const loop = new AgentLoop({}, {}, new Context([{ role: "user", content: "go" }]));
+
+  await expect(loop.next()).rejects.toThrow(
+    "model returned an empty response after 3 attempts (possible upstream timeout)",
+  );
+  expect(streamTextMock).toHaveBeenCalledTimes(3);
+  await expect(loop.getMessages()).resolves.toEqual([{ role: "user", content: "go" }]);
+});
+
+test("rejects when the model response has no messages", async () => {
+  streamTextMock.mockReturnValue({
+    stream: emptyStream(),
+    toolCalls: [{ toolCallId: "call-1", toolName: "LS", input: { path: "." } }],
+    finishReason: "length",
+    finalStep: { response: { messages: [] } },
+  } as unknown as Awaited<ReturnType<typeof streamText>>);
+
+  const loop = new AgentLoop({}, {}, new Context([{ role: "user", content: "go" }]));
+
+  await expect(loop.next()).rejects.toThrow("model returned an empty response");
 });
 
 test("rewrites tool call ids and leaves the next step with the agent", async () => {
-  generateTextMock.mockResolvedValue({
+  streamTextMock.mockReturnValue({
+    stream: emptyStream(),
     toolCalls: [{ toolCallId: "model-1", toolName: "LS", input: { path: "." } }],
     finishReason: "tool-calls",
     finalStep: {
@@ -195,7 +293,7 @@ test("rewrites tool call ids and leaves the next step with the agent", async () 
         ],
       },
     },
-  } as unknown as Awaited<ReturnType<typeof generateText>>);
+  } as unknown as Awaited<ReturnType<typeof streamText>>);
 
   const loop = new AgentLoop(
     { LS: lsTool },
@@ -223,7 +321,7 @@ test("rewrites tool call ids and leaves the next step with the agent", async () 
       ],
     },
   ]);
-  expect(generateTextMock.mock.calls[0]?.[0].tools?.LS?.execute).toBeUndefined();
+  expect(streamTextMock.mock.calls[0]?.[0].tools?.LS?.execute).toBeUndefined();
 });
 
 test("runs a pending tool and records the result", async () => {
@@ -245,9 +343,14 @@ test("runs a pending tool and records the result", async () => {
     },
   ]);
   const loop = new AgentLoop({}, { LS: executor }, context);
+  const events: AgentLoopEvent[] = [];
 
-  const result = await loop.next();
+  const result = await loop.next(undefined, (event) => events.push(event));
 
+  expect(events).toEqual([
+    { type: "activity", id: "call-1", kind: "tool", name: "LS", state: "running" },
+    { type: "activity", id: "call-1", kind: "tool", name: "LS", state: "done" },
+  ]);
   expect(executor).toHaveBeenCalledWith(
     { path: "/tmp" },
     { name: "LS", callId: "call-1" },
@@ -272,7 +375,7 @@ test("runs a pending tool and records the result", async () => {
       ],
     },
   ]);
-  expect(generateTextMock).not.toHaveBeenCalled();
+  expect(streamTextMock).not.toHaveBeenCalled();
 });
 
 test("passes the stored copilot response into the pending tool", async () => {
@@ -405,13 +508,14 @@ test("rejects a tool call that has no executor", async () => {
 });
 
 test("ignores a tool call that already has a result", async () => {
-  generateTextMock.mockResolvedValue({
+  streamTextMock.mockReturnValue({
+    stream: emptyStream(),
     toolCalls: [],
     finishReason: "stop",
     finalStep: {
       response: { messages: [{ role: "assistant", content: "listed" }] },
     },
-  } as unknown as Awaited<ReturnType<typeof generateText>>);
+  } as unknown as Awaited<ReturnType<typeof streamText>>);
   const executor = vi.fn<ToolExecutor>();
   const loop = new AgentLoop(
     {},
@@ -446,5 +550,5 @@ test("ignores a tool call that already has a result", async () => {
 
   expect(executor).not.toHaveBeenCalled();
   expect(result.nextActor).toBe("user");
-  expect(generateTextMock).toHaveBeenCalledOnce();
+  expect(streamTextMock).toHaveBeenCalledOnce();
 });

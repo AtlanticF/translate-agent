@@ -46,12 +46,18 @@ import {
 import { inputPlaceholder, submittedUserText } from "../../shared/welcome";
 import type { CopilotReviewResponse } from "../lib/copilot-batch";
 import { noteCopilotDecision } from "../lib/copilot-batch";
-import type { ClientFile, ClientTurn, ClientTurnBody } from "../lib/client-loop";
-import { runTurns } from "../lib/client-loop";
+import type {
+  ClientFile,
+  ClientLiveEvent,
+  ClientTurn,
+  ClientTurnBody,
+} from "../lib/client-loop";
+import { postNextTurn, runTurns } from "../lib/client-loop";
 import { toolTitle, viewItems } from "../lib/view-items";
 import type { SessionSummary } from "../lib/session-title";
 
 type ImportedFile = ClientFile;
+type LiveActivity = Extract<ClientLiveEvent, { type: "activity" }>;
 
 export default function Home() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -65,13 +71,33 @@ export default function Home() {
   const [files, setFiles] = useState<ImportedFile[]>([]);
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [liveText, setLiveText] = useState("");
+  const [liveActivities, setLiveActivities] = useState<LiveActivity[]>([]);
   const [error, setError] = useState<string | undefined>();
   const [reveal, setReveal] = useState<"restore" | "live">("live");
   const pending = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const requestsRef = useRef(requests);
   const decisionsRef = useRef(decisions);
-  const items = viewItems(messages);
+  const activitiesById = new Map(liveActivities.map((activity) => [activity.id, activity]));
+  const items = viewItems(messages).map((item) => {
+    const activity = item.kind === "tool" ? activitiesById.get(item.id) : undefined;
+    if (!activity || item.kind !== "tool") {
+      return item;
+    }
+    return {
+      ...item,
+      state: activity.state === "preparing" ? "running" : activity.state,
+    };
+  });
+  const transientActivities = liveActivities.filter(
+    (activity) => !items.some((item) => item.kind === "tool" && item.id === activity.id),
+  );
+  const waitingForActivity =
+    busy &&
+    !liveText &&
+    liveActivities.length === 0 &&
+    !items.some((item) => item.kind === "tool" && item.state === "running");
   const reviewing = requests.length > 0;
   const decidedCount = requests.filter((request) => decisions[request.tool.callId]).length;
 
@@ -100,6 +126,8 @@ export default function Home() {
     setDecisions({});
     setDraft("");
     setFiles([]);
+    setLiveText("");
+    setLiveActivities([]);
     setError(undefined);
   }
 
@@ -179,6 +207,8 @@ export default function Home() {
       setRequests([]);
       setDecisions({});
       setDraft("");
+      setLiveText("");
+      setLiveActivities([]);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -278,7 +308,32 @@ export default function Home() {
                       </MessageScrollerItem>
                     ),
                   )}
-                  {busy ? (
+                  {liveText ? (
+                    <MessageScrollerItem
+                      messageId="live-text"
+                      className={enterClass("assistant")}
+                      style={enterStyle(items.length, reveal)}
+                    >
+                      <Message align="start">
+                        <MessageContent>
+                          <Bubble align="start" variant="default">
+                            <BubbleContent>{liveText}</BubbleContent>
+                          </Bubble>
+                        </MessageContent>
+                      </Message>
+                    </MessageScrollerItem>
+                  ) : null}
+                  {transientActivities.map((activity, index) => (
+                    <MessageScrollerItem
+                      key={activity.id}
+                      messageId={`live-activity-${activity.id}`}
+                      className={enterClass("tool")}
+                      style={enterStyle(items.length + index + (liveText ? 1 : 0), reveal)}
+                    >
+                      <ActivityTrace activity={activity} />
+                    </MessageScrollerItem>
+                  ))}
+                  {waitingForActivity ? (
                     <MessageScrollerItem
                       messageId="processing"
                       className={enterClass("assistant")}
@@ -442,25 +497,52 @@ export default function Home() {
   async function turn(body: ClientTurnBody) {
     setBusy(true);
     setError(undefined);
+    setLiveText("");
+    setLiveActivities([]);
     try {
-      await runTurns(postTurn, body, (step) => {
-        setSessionId(step.sessionId);
-        if (step.files) {
-          setFiles(step.files);
-        }
-        if (step.agentResponse.messages.length > 0) {
-          setMessages((current) => [...current, ...step.agentResponse.messages]);
-        }
-        const nextRequests = step.agentResponse.copilotRequests;
-        requestsRef.current = nextRequests;
-        decisionsRef.current = {};
-        setRequests(nextRequests);
-        setDecisions({});
-      });
+      await runTurns(
+        postNextTurn,
+        body,
+        (step) => {
+          setLiveText("");
+          setLiveActivities([]);
+          setSessionId(step.sessionId);
+          if (step.files) {
+            setFiles(step.files);
+          }
+          if (step.agentResponse.messages.length > 0) {
+            setMessages((current) => [...current, ...step.agentResponse.messages]);
+          }
+          const nextRequests = step.agentResponse.copilotRequests;
+          requestsRef.current = nextRequests;
+          decisionsRef.current = {};
+          setRequests(nextRequests);
+          setDecisions({});
+        },
+        (event) => {
+          if (event.type === "start") {
+            setSessionId(event.sessionId);
+          } else if (event.type === "text-delta") {
+            setLiveText((current) => current + event.delta);
+          } else {
+            setLiveActivities((current) => {
+              const index = current.findIndex((activity) => activity.id === event.id);
+              if (index < 0) {
+                return [...current, event];
+              }
+              const next = [...current];
+              next[index] = event;
+              return next;
+            });
+          }
+        },
+      );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setBusy(false);
+      setLiveText("");
+      setLiveActivities([]);
       void loadSessions();
     }
   }
@@ -477,19 +559,6 @@ export default function Home() {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
   }
-}
-
-async function postTurn(body: ClientTurnBody): Promise<ClientTurn> {
-  const response = await fetch("/next", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const payload = (await response.json()) as ClientTurn | { error: string };
-  if (!response.ok || !("agentResponse" in payload)) {
-    throw new Error("error" in payload ? payload.error : "request failed");
-  }
-  return payload;
 }
 
 function FileProgress({
@@ -543,6 +612,43 @@ function downloadHref(sessionId: string | undefined, fileId: string): string {
     return "#";
   }
   return `/sessions/${sessionId}/files/${fileId}/translated`;
+}
+
+function ActivityTrace({ activity }: { activity: LiveActivity }) {
+  const running = activity.state === "preparing" || activity.state === "running";
+  return (
+    <Trace>
+      <TraceLine status={running ? "running" : undefined}>
+        <TraceIcon>
+          {running ? <Loader2Icon className="animate-spin" /> : <TerminalIcon />}
+        </TraceIcon>
+        <TraceTitle>{activityTitle(activity)}</TraceTitle>
+      </TraceLine>
+    </Trace>
+  );
+}
+
+function activityTitle(activity: LiveActivity): string {
+  const labels: Record<string, string> = {
+    LS: "查找文件",
+    Read: "读取文件",
+    Translate: "翻译段落",
+    WebFetch: "获取网页",
+    webDocTransfer: "提取正文",
+    convertHtmlToMarkdown: "转换 Markdown",
+    Write: "保存文档",
+  };
+  const label = labels[activity.name] ?? activity.name;
+  if (activity.state === "preparing") {
+    return `准备 ${label}`;
+  }
+  if (activity.state === "running") {
+    return `正在 ${label}`;
+  }
+  if (activity.state === "error") {
+    return `${label}失败`;
+  }
+  return `${label}完成`;
 }
 
 function ToolTrace({ item }: { item: Extract<ReturnType<typeof viewItems>[number], { kind: "tool" }> }) {

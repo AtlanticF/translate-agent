@@ -1,9 +1,10 @@
 import { expect, test } from "vitest";
 import {
-  webDocTransferExecutor,
+  createWebDocTransferExecutor,
   webDocTransferTool,
   type WebDocTransferOutput,
 } from "./web-doc-transfer.js";
+import type { WebFileIO } from "./web-io.js";
 
 const options = { name: "webDocTransfer", callId: "call-1" };
 
@@ -24,34 +25,72 @@ const articleHtml = `<!doctype html>
   </body>
 </html>`;
 
-test("extracts the article title and clean body HTML", async () => {
-  const result = await webDocTransferExecutor(
-    { url: "https://example.com/blog/effective-agents", html: articleHtml },
+function memoryIO(files: Record<string, string>): WebFileIO & { saved: Array<{ name: string; content: string }> } {
+  const saved: Array<{ name: string; content: string }> = [];
+  let index = 0;
+  return {
+    saved,
+    async read(file_path) {
+      const content = files[file_path];
+      if (content === undefined) {
+        throw new Error(`File not found: ${file_path}`);
+      }
+      return content;
+    },
+    async save(input) {
+      index += 1;
+      saved.push({ name: input.name, content: input.content });
+      return { file_path: `/store/doc-${index}` };
+    },
+  };
+}
+
+test("reads saved HTML, extracts the article, and saves the clean HTML", async () => {
+  const io = memoryIO({ "/store/web-1": articleHtml });
+  const execute = createWebDocTransferExecutor(io);
+
+  const result = await execute(
+    { url: "https://example.com/blog/effective-agents", file_path: "/store/web-1" },
     options,
   );
 
   expect(result.type).toBe("json");
   const output = result.payload as WebDocTransferOutput;
   expect(output.title).toBe("Effective agents");
-  expect(output.html).toContain("Long-running agents need a clear harness");
-  expect(output.html).toContain('<a href="https://example.com/reference">Read the reference</a>');
-  expect(output.html).not.toContain("Navigation that should not be translated");
-  expect(output.html).not.toContain("Related advertisements");
+  expect(output.file_path).toBe("/store/doc-1");
+  expect(output.preview).toContain("Long-running agents need a clear harness");
+  expect(output.bytes).toBeGreaterThan(0);
+
+  expect(io.saved).toHaveLength(1);
+  expect(io.saved[0].name).toBe("Effective-agents.article.html");
+  expect(io.saved[0].content).toContain("Long-running agents need a clear harness");
+  expect(io.saved[0].content).toContain('<a href="https://example.com/reference">Read the reference</a>');
+  expect(io.saved[0].content).not.toContain("Navigation that should not be translated");
+  expect(io.saved[0].content).not.toContain("Related advertisements");
 });
 
 test("rejects HTML without an extractable article", async () => {
+  const execute = createWebDocTransferExecutor(memoryIO({ "/store/empty": "<html><body></body></html>" }));
+
   await expect(
-    webDocTransferExecutor(
-      { url: "https://example.com", html: "<html><body></body></html>" },
-      options,
-    ),
+    execute({ url: "https://example.com", file_path: "/store/empty" }, options),
   ).rejects.toThrow("Unable to extract an article from the HTML document");
 });
 
 test("rejects invalid article URLs", async () => {
+  const execute = createWebDocTransferExecutor(memoryIO({ "/store/web-1": articleHtml }));
+
   await expect(
-    webDocTransferExecutor({ url: "not-a-url", html: articleHtml }, options),
+    execute({ url: "not-a-url", file_path: "/store/web-1" }, options),
   ).rejects.toThrow("url must be a valid HTTP or HTTPS URL");
+});
+
+test("surfaces read failures for unknown file paths", async () => {
+  const execute = createWebDocTransferExecutor(memoryIO({}));
+
+  await expect(
+    execute({ url: "https://example.com", file_path: "/store/missing" }, options),
+  ).rejects.toThrow("File not found: /store/missing");
 });
 
 test("exposes the webDocTransfer tool name", () => {

@@ -1,5 +1,5 @@
 import {
-  generateText,
+  streamText,
   stepCountIs,
   type FinishReason,
   type ModelMessage,
@@ -30,6 +30,18 @@ export type AgentLoopNext = {
   messages: ModelMessage[];
   finishReason?: FinishReason;
 };
+
+export type AgentLoopEvent =
+  | { type: "text-delta"; delta: string }
+  | {
+      type: "activity";
+      id: string;
+      kind: "tool";
+      name: string;
+      state: "preparing" | "running" | "done" | "error";
+    };
+
+export type AgentLoopEventHandler = (event: AgentLoopEvent) => void;
 
 type NextStep = {
   messages: ModelMessage[];
@@ -67,7 +79,7 @@ export class AgentLoop {
     return [...this.context.getMessages()];
   }
 
-  async next(signal?: AbortSignal): Promise<AgentLoopNext> {
+  async next(signal?: AbortSignal, emit?: AgentLoopEventHandler): Promise<AgentLoopNext> {
     if (signal?.aborted) {
       return {
         nextActor: "user",
@@ -76,7 +88,7 @@ export class AgentLoop {
         messages: [],
       };
     }
-    const step = await this.resolveStep(signal);
+    const step = await this.resolveStep(signal, emit);
     // 先写入新消息，再统计未执行的 tool，返回值才能反映这一步之后的状态。
     this.context.addMessages(step.messages);
 
@@ -89,7 +101,7 @@ export class AgentLoop {
     };
   }
 
-  private async resolveStep(signal?: AbortSignal): Promise<NextStep> {
+  private async resolveStep(signal?: AbortSignal, emit?: AgentLoopEventHandler): Promise<NextStep> {
     // 还没有消息，说明是第一次进入，等用户输入。
     if (this.context.toModelMessages().length === 0) {
       return { messages: [], actor: "user", copilotRequests: [] };
@@ -97,10 +109,10 @@ export class AgentLoop {
 
     const pending = this.getUnprocessedToolCalls();
     if (pending.length === 0) {
-      return this.askModel(signal);
+      return this.askModel(signal, emit);
     }
 
-    return this.runTools(pending);
+    return this.runTools(pending, emit);
   }
 
   private getUnprocessedToolCalls(): ToolCallPart[] {
@@ -128,60 +140,85 @@ export class AgentLoop {
     return Object.values(parts);
   }
 
-  private async askModel(signal?: AbortSignal): Promise<NextStep> {
-    let result: Awaited<ReturnType<typeof generateText>>;
-    try {
-      result = await generateText({
-        model: models.translator,
-        system: SYSTEM_WORKFLOW({
-          currentMemory: this.options.memory?.provideMemory() ?? "",
-          skillsPrompt: this.options.skillsPrompt,
-        }),
-        // 去掉 execute，避免 SDK 自己跑工具；协同请求要由这里拦截。
-        tools: toolsWithoutExecute(this.toolsDef),
-        messages: this.context.toModelMessages(),
-        stopWhen: stepCountIs(1),
-        abortSignal: signal,
-        telemetry: { functionId: "translator" },
-      });
-    } catch (error) {
-      if (signal?.aborted) {
-        return { messages: [], actor: "user", copilotRequests: [] };
+  private async askModel(signal?: AbortSignal, emit?: AgentLoopEventHandler): Promise<NextStep> {
+    for (let attempt = 1; attempt <= emptyResponseAttempts; attempt++) {
+      let result: Awaited<ReturnType<typeof streamText>>;
+      try {
+        result = await streamText({
+          model: models.translator,
+          system: SYSTEM_WORKFLOW({
+            currentMemory: this.options.memory?.provideMemory() ?? "",
+            skillsPrompt: this.options.skillsPrompt,
+          }),
+          // 去掉 execute，避免 SDK 自己跑工具；协同请求要由这里拦截。
+          tools: toolsWithoutExecute(this.toolsDef),
+          messages: this.context.toModelMessages(),
+          stopWhen: stepCountIs(1),
+          abortSignal: signal,
+          telemetry: { functionId: "translator" },
+        });
+        for await (const part of result.stream) {
+          if (part.type === "text-delta") {
+            emit?.({ type: "text-delta", delta: part.text });
+          } else if (part.type === "tool-input-start") {
+            emit?.({
+              type: "activity",
+              id: part.id,
+              kind: "tool",
+              name: part.toolName,
+              state: "preparing",
+            });
+          } else if (part.type === "error") {
+            throw part.error;
+          }
+        }
+      } catch (error) {
+        if (signal?.aborted) {
+          return { messages: [], actor: "user", copilotRequests: [] };
+        }
+        throw error;
       }
-      throw error;
-    }
 
-    // finalStep.response 是当前推荐入口，顶层 result.response 已废弃。
-    const responseMessages = result.finalStep.response.messages;
-    if (responseMessages.length === 0) {
+      // finalStep.response 是当前推荐入口，顶层 result.response 已废弃。
+      const responseMessages = (await result.finalStep).response.messages;
+      const finishReason = await result.finishReason;
+      const messages = assignToolCallIds(responseMessages);
+      // 上游超时等故障会让模型只输出 reasoning 就结束（无文本、无 tool call）。
+      // 直接当作回合结束会让前端静默停止，这里按失败处理：重试，仍失败则报错。
+      if (!hasUserVisibleOutput(messages)) {
+        if (attempt === emptyResponseAttempts) {
+          throw new Error(
+            `model returned an empty response after ${attempt} attempts (possible upstream timeout)`,
+          );
+        }
+        continue;
+      }
+
+      const lastMessage = messages.at(-1);
+      // assistant 已经回复完，下一步交给用户；如果还带了 tool call，则仍由 agent 执行。
+      let actor: NextActor = "user";
+      if (lastMessage?.role === "assistant") {
+        actor = "user";
+      }
+      if ((await result.toolCalls).length > 0) {
+        actor = "agent";
+      }
+
       return {
-        messages: [],
-        actor: "user",
-        finishReason: result.finishReason,
+        messages,
+        actor,
+        finishReason,
         copilotRequests: [],
       };
     }
 
-    const messages = assignToolCallIds(responseMessages);
-    const lastMessage = messages.at(-1);
-    // assistant 已经回复完，下一步交给用户；如果还带了 tool call，则仍由 agent 执行。
-    let actor: NextActor = "user";
-    if (lastMessage?.role === "assistant") {
-      actor = "user";
-    }
-    if (result.toolCalls.length > 0) {
-      actor = "agent";
-    }
-
-    return {
-      messages,
-      actor,
-      finishReason: result.finishReason,
-      copilotRequests: [],
-    };
+    throw new Error("unreachable: empty response retry loop exited");
   }
 
-  private async runTools(unprocessedToolCalls: readonly ToolCallPart[]): Promise<NextStep> {
+  private async runTools(
+    unprocessedToolCalls: readonly ToolCallPart[],
+    emit?: AgentLoopEventHandler,
+  ): Promise<NextStep> {
     const copilotResponseMap = this.context
       .getCopilotResponses(unprocessedToolCalls.map((call) => call.toolCallId))
       .reduce(
@@ -194,7 +231,9 @@ export class AgentLoop {
       );
 
     const toolResults = await Promise.all(
-      unprocessedToolCalls.map((call) => this.executeTool(call, copilotResponseMap[call.toolCallId])),
+      unprocessedToolCalls.map((call) =>
+        this.executeTool(call, copilotResponseMap[call.toolCallId], emit),
+      ),
     );
 
     const results: ToolResultPart[] = [];
@@ -218,7 +257,8 @@ export class AgentLoop {
 
   private async executeTool(
     part: ToolCallPart,
-    copilotResponse?: CopilotResponse,
+    copilotResponse: CopilotResponse | undefined,
+    emit?: AgentLoopEventHandler,
   ): Promise<ToolExecution> {
     const input = part.input;
     const executor = this.toolsExecutor[part.toolName];
@@ -231,6 +271,13 @@ export class AgentLoop {
       name: part.toolName,
       callId: part.toolCallId,
     };
+    emit?.({
+      type: "activity",
+      id: part.toolCallId,
+      kind: "tool",
+      name: part.toolName,
+      state: "running",
+    });
 
     try {
       const result = await traceTool(part.toolName, input, () =>
@@ -241,6 +288,13 @@ export class AgentLoop {
         return result;
       }
 
+      emit?.({
+        type: "activity",
+        id: part.toolCallId,
+        kind: "tool",
+        name: part.toolName,
+        state: "done",
+      });
       return {
         type: "tool-result-part",
         payload: {
@@ -254,6 +308,13 @@ export class AgentLoop {
         },
       };
     } catch (error) {
+      emit?.({
+        type: "activity",
+        id: part.toolCallId,
+        kind: "tool",
+        name: part.toolName,
+        state: "error",
+      });
       // 执行失败也写成 tool result，模型下一轮能看到错误原因。
       return {
         type: "tool-result-part",
@@ -278,6 +339,35 @@ function toolsWithoutExecute(tools: ToolSet): ToolSet {
     definitions[name] = rest;
   }
   return definitions;
+}
+
+const emptyResponseAttempts = 3;
+
+// 判断响应里是否有用户可见的产出：非空文本或 tool call。只剩 reasoning 视为空响应。
+function hasUserVisibleOutput(messages: readonly ModelMessage[]): boolean {
+  for (const message of messages) {
+    if (message.role !== "assistant") {
+      continue;
+    }
+    if (typeof message.content === "string") {
+      if (message.content.trim().length > 0) {
+        return true;
+      }
+      continue;
+    }
+    if (!Array.isArray(message.content)) {
+      continue;
+    }
+    for (const part of message.content) {
+      if (part.type === "tool-call") {
+        return true;
+      }
+      if (part.type === "text" && part.text.trim().length > 0) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 // 模型给出的 toolCallId 换成我们自己的 id。同一次响应里相同的旧 id 使用同一个新 id。

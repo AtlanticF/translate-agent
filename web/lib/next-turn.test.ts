@@ -2,7 +2,7 @@ import { APICallError, RetryError } from "ai";
 import { expect, test } from "vitest";
 import type { AgentLoopNext } from "../../src/agent/agent-loop";
 import type { CopilotRequest } from "../../src/prompts/system.memory";
-import { describeModelError, postNext } from "./next-turn";
+import { describeModelError, postNext, type NextTurnEvent } from "./next-turn";
 import { createSqliteSessionStore } from "./session-sqlite";
 
 const request: CopilotRequest = {
@@ -84,6 +84,52 @@ test("restores a session and saves the finished step", async () => {
   expect(openedSessionId).toBe(created.id);
   expect((await sessions.get(userId, created.id))?.messages).toEqual([
     { role: "user", content: "earlier" },
+    { role: "user", content: "hello" },
+    { role: "assistant", content: "done" },
+  ]);
+});
+
+test("emits transient events and finishes with the saved step", async () => {
+  const sessions = createSqliteSessionStore();
+  const events: NextTurnEvent[] = [];
+
+  const result = await postNext(
+    userId,
+    { userInput: "hello" },
+    undefined,
+    sessions,
+    async () => ({
+      async userInput() {},
+      addCopilotResponses() {},
+      async next(_signal, emit) {
+        emit?.({ type: "text-delta", delta: "do" });
+        emit?.({ type: "text-delta", delta: "ne" });
+        return {
+          nextActor: "user",
+          messages: [{ role: "assistant", content: "done" }],
+          copilotRequests: [],
+          unprocessedToolCalls: [],
+        };
+      },
+    }),
+    undefined,
+    (event) => events.push(event),
+  );
+
+  expect(events.map((event) => event.type)).toEqual([
+    "start",
+    "text-delta",
+    "text-delta",
+    "done",
+  ]);
+  expect(events[0]).toMatchObject({ type: "start", sessionId: expect.any(String) });
+  expect(events.at(-1)).toMatchObject({
+    type: "done",
+    turn: { agentResponse: { messages: [{ role: "assistant", content: "done" }] } },
+  });
+  expect(result.status).toBe(200);
+  const sessionId = "sessionId" in result.body ? result.body.sessionId : "";
+  expect((await sessions.get(userId, sessionId))?.messages).toEqual([
     { role: "user", content: "hello" },
     { role: "assistant", content: "done" },
   ]);
@@ -309,4 +355,56 @@ test("omits the file list once every imported file is finished", async () => {
     role: "user",
     content: "translate this",
   });
+});
+
+test("hides html intermediates from the turn file list", async () => {
+  const sessions = createSqliteSessionStore();
+  const created = await sessions.create(userId);
+
+  const result = await postNext(
+    userId,
+    { sessionId: created.id },
+    undefined,
+    sessions,
+    async () => ({
+      userInput: async () => {},
+      addCopilotResponses() {},
+      async next() {
+        return {
+          nextActor: "user",
+          messages: [],
+          copilotRequests: [],
+          unprocessedToolCalls: [],
+        };
+      },
+    }),
+    {
+      async list() {
+        return [
+          {
+            path: "/sessions/s/files/1/article.raw.html",
+            status: "open" as const,
+            id: "file-1",
+            name: "article.raw.html",
+            mediaType: "text/html",
+            progress: 0,
+          },
+          {
+            path: "/sessions/s/files/2/article.md",
+            status: "open" as const,
+            id: "file-2",
+            name: "article.md",
+            mediaType: "text/markdown",
+            progress: 0,
+          },
+        ];
+      },
+    },
+  );
+
+  expect(result.status).toBe(200);
+  if (!("files" in result.body)) {
+    throw new Error("expected a successful turn body");
+  }
+  expect(result.body.files.map((file) => file.name)).toEqual(["article.md"]);
 });

@@ -5,8 +5,8 @@ import { Context } from "../messages/context.js";
 import { Memory } from "../memory/memory.js";
 import type { SkillDirEntry } from "../skills/fs.js";
 import {
-  convertHtmlToMarkdownExecutor,
   convertHtmlToMarkdownTool,
+  createConvertHtmlToMarkdownExecutor,
 } from "../tools/convert-html-to-markdown.js";
 import { createLsExecutor, lsExecutor, lsTool } from "../tools/ls-tool.js";
 import { createReadExecutor, readExecutor, readTool } from "../tools/read-tool.js";
@@ -16,8 +16,12 @@ import {
   type TranslateReader,
   type TranslateWriter,
 } from "../tools/translate-tool.js";
-import { webDocTransferExecutor, webDocTransferTool } from "../tools/web-doc-transfer.js";
-import { webFetchExecutor, webFetchTool } from "../tools/web-fetch.js";
+import {
+  createWebDocTransferExecutor,
+  webDocTransferTool,
+} from "../tools/web-doc-transfer.js";
+import { createWebFetchExecutor, webFetchTool } from "../tools/web-fetch.js";
+import type { WebFileIO } from "../tools/web-io.js";
 import { createWriteExecutor, writeExecutor, writeTool, type WriteWriter } from "../tools/write.js";
 
 export async function createSession(
@@ -54,6 +58,7 @@ export type LoopIO = {
   write?: TranslateWriter;
   writeFile?: WriteWriter;
   ls?: (path: string) => Promise<readonly SkillDirEntry[]>;
+  webFiles?: WebFileIO;
 };
 
 export type LoopOptions = {
@@ -91,9 +96,9 @@ function toolExecutors(io: LoopIO = {}) {
       writer: io.write ?? writeTranslation,
       read: io.read,
     }),
-    WebFetch: webFetchExecutor,
-    webDocTransfer: webDocTransferExecutor,
-    convertHtmlToMarkdown: convertHtmlToMarkdownExecutor,
+    WebFetch: createWebFetchExecutor(fetch, io.webFiles),
+    webDocTransfer: createWebDocTransferExecutor(io.webFiles),
+    convertHtmlToMarkdown: createConvertHtmlToMarkdownExecutor(io.webFiles),
     Write: io.writeFile ? createWriteExecutor(io.writeFile) : writeExecutor,
   };
 }

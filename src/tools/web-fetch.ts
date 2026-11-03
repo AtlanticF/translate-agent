@@ -1,6 +1,7 @@
 import { tool, zodSchema } from "ai";
 import { z } from "zod";
 import type { ToolExecutor } from "./executor.js";
+import { localWebFileIO, safeWebFileName, type WebFileIO } from "./web-io.js";
 
 export type WebFetchInput = {
   url: string;
@@ -8,12 +9,17 @@ export type WebFetchInput = {
 
 export type WebFetchOutput = {
   url: string;
-  html: string;
+  file_path: string;
+  title: string;
+  bytes: number;
+  preview: string;
 };
+
+const previewLength = 200;
 
 const description = `Fetch a public web article over HTTP or HTTPS.
 
-Use this tool before extracting an article. It validates that the URL is accessible and returns HTML. It does not extract the article body or convert HTML to Markdown.`;
+Use this tool before extracting an article. It validates that the URL is accessible and returns HTML, saves the raw HTML server-side, and returns its file_path plus a short preview. It does not extract the article body or convert HTML to Markdown. Pass the returned file_path (never the HTML contents) to the next tool.`;
 
 const inputSchema = zodSchema(
   z.object({
@@ -24,12 +30,16 @@ const inputSchema = zodSchema(
 const outputSchema = zodSchema(
   z.object({
     url: z.string().describe("Final URL after following redirects."),
-    html: z.string().describe("Raw HTML returned by the final URL."),
+    file_path: z.string().describe("Server-side path of the saved raw HTML. Pass this to webDocTransfer."),
+    title: z.string().describe("Title of the fetched document."),
+    bytes: z.number().describe("Size of the saved HTML in bytes."),
+    preview: z.string().describe("First characters of the page text, for a quick sanity check."),
   }),
 );
 
 export function createWebFetchExecutor(
   fetchImpl: typeof fetch = fetch,
+  io: WebFileIO = localWebFileIO,
 ): ToolExecutor<WebFetchInput> {
   return async (input) => {
     const url = parseHttpUrl(input.url);
@@ -44,9 +54,22 @@ export function createWebFetchExecutor(
       throw new Error(`Expected an HTML article but received ${contentType || "unknown content type"}`);
     }
 
+    const html = await response.text();
+    const saved = await io.save({
+      name: `${htmlFileName(finalUrl)}.raw.html`,
+      mediaType: "text/html",
+      content: html,
+    });
+
     return {
       type: "json",
-      payload: { url: finalUrl.href, html: await response.text() },
+      payload: {
+        url: finalUrl.href,
+        file_path: saved.file_path,
+        title: htmlTitle(html) || finalUrl.hostname,
+        bytes: html.length,
+        preview: previewText(html),
+      },
     };
   };
 }
@@ -68,6 +91,41 @@ export const webFetchTool = Object.assign(
   }),
   { name: "WebFetch" as const },
 );
+
+function htmlFileName(url: URL): string {
+  const base = pathBasename(url.pathname);
+  return safeWebFileName(base || url.hostname);
+}
+
+function pathBasename(pathname: string): string {
+  const parts = pathname.split("/").filter(Boolean);
+  return parts.at(-1) ?? "";
+}
+
+function htmlTitle(html: string): string {
+  const match = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
+  return match ? decodeEntities(match[1]).replace(/\s+/g, " ").trim().slice(0, 200) : "";
+}
+
+function previewText(html: string): string {
+  const body = /<body[^>]*>([\s\S]*?)<\/body>/i.exec(html)?.[1] ?? html;
+  const text = body
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text.slice(0, previewLength);
+}
+
+function decodeEntities(value: string): string {
+  return value
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
 
 function parseHttpUrl(value: string): URL {
   try {
