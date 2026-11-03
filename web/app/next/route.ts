@@ -3,7 +3,8 @@ import { fileURLToPath } from "node:url";
 import type { ModelMessage } from "ai";
 import { loadEnvFile } from "../../../src/env";
 import { readLocalDir } from "../../../src/tools/ls-tool";
-import { postNext, type NextTurnRequest } from "../../lib/next-turn";
+import type { WebFileIO } from "../../../src/tools/web-io";
+import { postNext, type NextTurnEventHandler, type NextTurnRequest } from "../../lib/next-turn";
 import { requireUserId } from "../../lib/request-auth";
 import type { SessionStore } from "../../lib/session";
 import { getSessionFileStore, getSessionStore } from "../../lib/session-cloudflare";
@@ -29,16 +30,62 @@ export async function POST(request: Request) {
   const sessions = await getSessionStore();
   const files = await getSessionFileStore();
   const skills = await loadSkills();
-  const result = await postNext(
-    auth.userId,
-    body,
-    request.signal,
-    sessions,
-    (messages, sessionId) =>
-      openLoop(messages, { sessions, files, userId: auth.userId, sessionId, skills }),
-    files,
-  );
-  return Response.json(result.body, { status: result.status });
+  const encoder = new TextEncoder();
+  const abort = new AbortController();
+  let cancelled = false;
+  const forwardAbort = () => {
+    cancelled = true;
+    abort.abort(request.signal.reason);
+  };
+  request.signal.addEventListener("abort", forwardAbort, { once: true });
+
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const emit: NextTurnEventHandler = (event) => {
+        if (!cancelled) {
+          const data = JSON.stringify(event);
+          controller.enqueue(encoder.encode(`event: ${event.type}\ndata: ${data}\n\n`));
+        }
+      };
+      try {
+        await postNext(
+          auth.userId,
+          body,
+          abort.signal,
+          sessions,
+          (messages, sessionId) =>
+            openLoop(messages, { sessions, files, userId: auth.userId, sessionId, skills }),
+          files,
+          emit,
+        );
+      } catch (error) {
+        console.error("next stream failed:", error);
+        if (!abort.signal.aborted) {
+          emit({
+            type: "error",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      } finally {
+        request.signal.removeEventListener("abort", forwardAbort);
+        if (!cancelled) {
+          controller.close();
+        }
+      }
+    },
+    cancel() {
+      cancelled = true;
+      abort.abort();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-cache, no-transform",
+      "x-accel-buffering": "no",
+    },
+  });
 }
 
 function loadSkills(): Promise<LoadedSkills> {
@@ -59,6 +106,19 @@ async function openLoop(
   const session = await import("../../lib/agent-session.js");
   const readImported = ownedReadOriginalText(context.sessions, context.files, context.userId);
   const appendTranslated = ownedAppendTranslated(context.sessions, context.files, context.userId);
+  // Web 工具链的中间产物（raw/clean HTML、markdown）都存在 session file store，
+  // 模型只拿 file_path，避免在 tool call 参数里回显大段 HTML。
+  const webFiles: WebFileIO = {
+    read: readImported,
+    save: async ({ name, mediaType, content }) => {
+      const saved = await context.files.add(context.sessionId, {
+        name: path.basename(name) || "article.html",
+        mediaType,
+        bytes: new TextEncoder().encode(content),
+      });
+      return { file_path: saved.path };
+    },
+  };
   return session.createLoop(
     messages,
     {
@@ -84,6 +144,7 @@ async function openLoop(
         isSkillsPath(dirPath)
           ? context.skills.fs.readDir(dirPath)
           : readLocalDir(dirPath),
+      webFiles,
     },
     { skillsPrompt: context.skills.prompt },
   );

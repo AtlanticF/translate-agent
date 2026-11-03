@@ -19,11 +19,11 @@ test("describes the translation workflow without preferences when memory is empt
 test("describes the web article workflow and its failure boundary", () => {
   const prompt = SYSTEM_WORKFLOW({ currentMemory: "" });
 
-  expect(prompt).toContain("call 'WebFetch' once to validate access and fetch its HTML");
-  expect(prompt).toContain("pass the final URL and HTML to 'webDocTransfer'");
-  expect(prompt).toContain("pass the extracted article HTML to 'convertHtmlToMarkdown'");
-  expect(prompt).toContain("Do not call 'Write' or translate the raw HTML");
-  expect(prompt).toContain("Always use the actual file_path returned by 'Write'");
+  expect(prompt).toContain("call 'WebFetch' once to validate access");
+  expect(prompt).toContain("pass the final URL and the returned file_path to 'webDocTransfer'");
+  expect(prompt).toContain("Never place HTML or file contents in tool arguments");
+  expect(prompt).toContain("'convertHtmlToMarkdown' saves the Markdown file itself");
+  expect(prompt).toContain("Do not translate the raw HTML");
   expect(prompt).toContain("starting with 'Read'");
   expect(prompt.indexOf("'WebFetch'")).toBeLessThan(prompt.indexOf("'webDocTransfer'"));
   expect(prompt.indexOf("'webDocTransfer'")).toBeLessThan(

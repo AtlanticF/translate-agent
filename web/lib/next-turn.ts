@@ -1,5 +1,5 @@
 import { APICallError, RetryError, type ModelMessage, type UserModelMessage } from "ai";
-import type { AgentLoopNext } from "../../src/agent/agent-loop";
+import type { AgentLoopEvent, AgentLoopEventHandler, AgentLoopNext } from "../../src/agent/agent-loop";
 import type { CopilotResponseEntry } from "../../src/messages/context";
 import { withTrace } from "../../src/observability/langfuse";
 import { omitDoneFilePaths, withImportedFiles } from "./imported-files";
@@ -20,17 +20,29 @@ export type TurnFile = {
   progress: number;
 };
 
+export type NextTurnSuccess = {
+  sessionId: string;
+  agentResponse: AgentLoopNext;
+  files: TurnFile[];
+};
+
 export type NextTurnResponse = {
   status: number;
-  body:
-    | { sessionId: string; agentResponse: AgentLoopNext; files: TurnFile[] }
-    | { error: string };
+  body: NextTurnSuccess | { error: string };
 };
+
+export type NextTurnEvent =
+  | { type: "start"; sessionId: string }
+  | AgentLoopEvent
+  | { type: "done"; turn: NextTurnSuccess }
+  | { type: "error"; message: string };
+
+export type NextTurnEventHandler = (event: NextTurnEvent) => void;
 
 type TurnAgent = {
   userInput(messages: UserModelMessage[]): Promise<void>;
   addCopilotResponses(responses: readonly CopilotResponseEntry[]): void;
-  next(signal?: AbortSignal): Promise<AgentLoopNext>;
+  next(signal?: AbortSignal, emit?: AgentLoopEventHandler): Promise<AgentLoopNext>;
 };
 
 export type ImportedFileList = {
@@ -44,13 +56,16 @@ export async function postNext(
   sessions: SessionStore,
   openAgent: (messages: readonly ModelMessage[], sessionId: string) => Promise<TurnAgent> = openLoop,
   files?: ImportedFileList,
+  emit: NextTurnEventHandler = () => {},
 ): Promise<NextTurnResponse> {
   let session = request.sessionId
     ? await sessions.get(userId, request.sessionId)
     : await sessions.create(userId);
   if (!session) {
+    emit({ type: "error", message: "session not found" });
     return { status: 404, body: { error: "session not found" } };
   }
+  emit({ type: "start", sessionId: session.id });
 
   const imported = files ? await files.list(session.id) : [];
   const donePaths = imported.filter((file) => file.status === "done").map((file) => file.path);
@@ -75,10 +90,11 @@ export async function postNext(
 
   let step: AgentLoopNext;
   try {
-    step = await withTrace("web", session.id, () => agent.next(signal));
+    step = await withTrace("web", session.id, () => agent.next(signal, emit));
   } catch (error) {
     const detail = describeModelError(error);
     console.error("next turn failed:", detail);
+    emit({ type: "error", message: detail });
     return { status: 502, body: { error: detail } };
   }
   const after = files ? await files.list(session.id) : [];
@@ -91,9 +107,11 @@ export async function postNext(
   if (cleaned !== session.messages) {
     await sessions.update(userId, session.id, { messages: [...cleaned] });
   }
+  const body = { sessionId: session.id, agentResponse: step, files: fileList(after) };
+  emit({ type: "done", turn: body });
   return {
     status: 200,
-    body: { sessionId: session.id, agentResponse: step, files: fileList(after) },
+    body,
   };
 }
 
@@ -118,11 +136,17 @@ function findApiCallError(error: unknown): APICallError | undefined {
 }
 
 function fileList(
-  files: ReadonlyArray<{ path: string; status?: SessionFileStatus } & Partial<TurnFile>>,
+  files: ReadonlyArray<
+    { path: string; status?: SessionFileStatus; mediaType?: string } & Partial<TurnFile>
+  >,
 ): TurnFile[] {
   const listed: TurnFile[] = [];
   for (const file of files) {
     if (!file.id || !file.name) {
+      continue;
+    }
+    // text/html 是 URL 翻译流程的服务端中间产物，不进 UI 文件列表。
+    if (file.mediaType === "text/html") {
       continue;
     }
     const status = file.status === "done" ? "done" : "open";
