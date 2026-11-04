@@ -9,6 +9,10 @@ test("describes the translation workflow without preferences when memory is empt
   expect(prompt).toContain("always use the 'Read' tool to fetch the latest file contents.");
   expect(prompt).toContain("Use the 'Translate' tool to create translation units.");
   expect(prompt).toContain("Status 'Approve' or 'Refine' means the unit is complete");
+  expect(prompt).toContain(
+    "Translated content may ONLY be produced through the 'Translate' tool, one unit per call.",
+  );
+  expect(prompt).toContain("Do NOT switch strategies, merge units, or translate more per call to speed up.");
   expect(prompt).toContain("'Reject' means re-translation is required.");
   expect(prompt).toContain("Keep your responses short, since they will be displayed on a command line interface.");
   expect(prompt).not.toContain("# User preferences");

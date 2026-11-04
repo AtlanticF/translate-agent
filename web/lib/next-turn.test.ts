@@ -1,4 +1,4 @@
-import { APICallError, RetryError } from "ai";
+import { APICallError, RetryError, type ModelMessage } from "ai";
 import { expect, test } from "vitest";
 import type { AgentLoopNext } from "../../src/agent/agent-loop";
 import type { CopilotRequest } from "../../src/prompts/system.memory";
@@ -60,6 +60,7 @@ test("restores a session and saves the finished step", async () => {
       return {
         async userInput(next) {
           stored.push(...next);
+          return [];
         },
         addCopilotResponses() {},
         async next() {
@@ -99,7 +100,9 @@ test("emits transient events and finishes with the saved step", async () => {
     undefined,
     sessions,
     async () => ({
-      async userInput() {},
+      async userInput() {
+        return [];
+      },
       addCopilotResponses() {},
       async next(_signal, emit) {
         emit?.({ type: "text-delta", delta: "do" });
@@ -139,7 +142,9 @@ test("returns the upstream model error instead of throwing", async () => {
   const sessions = createSqliteSessionStore();
 
   const result = await postNext(userId, {}, undefined, sessions, async () => ({
-    async userInput() {},
+    async userInput() {
+      return [];
+    },
     addCopilotResponses() {},
     async next() {
       throw new APICallError({
@@ -181,7 +186,9 @@ test("returns a single step, even when the agent still has work", async () => {
   let calls = 0;
 
   const result = await postNext(userId, {}, undefined, sessions, async () => ({
-    async userInput() {},
+    async userInput() {
+      return [];
+    },
     addCopilotResponses() {},
     async next() {
       calls += 1;
@@ -225,6 +232,7 @@ test("tells the agent which files were imported", async () => {
       async userInput(messages) {
         const content = messages[0]?.content;
         userText = typeof content === "string" ? content : "";
+        return [];
       },
       addCopilotResponses() {},
       async next() {
@@ -273,6 +281,7 @@ test("drops finished files from the next message and from earlier context", asyn
         async userInput(next) {
           const content = next[0]?.content;
           seen.push(typeof content === "string" ? content : "");
+          return [];
         },
         addCopilotResponses() {},
         async next() {
@@ -331,6 +340,7 @@ test("omits the file list once every imported file is finished", async () => {
         async userInput(next) {
           const content = next[0]?.content;
           userText = typeof content === "string" ? content : "";
+          return [];
         },
         addCopilotResponses() {},
         async next() {
@@ -367,7 +377,7 @@ test("hides html intermediates from the turn file list", async () => {
     undefined,
     sessions,
     async () => ({
-      userInput: async () => {},
+      userInput: async () => [],
       addCopilotResponses() {},
       async next() {
         return {
@@ -407,4 +417,64 @@ test("hides html intermediates from the turn file list", async () => {
     throw new Error("expected a successful turn body");
   }
   expect(result.body.files.map((file) => file.name)).toEqual(["article.md"]);
+});
+
+test("repairs an interrupted session before continuing and stores the fixed order", async () => {
+  const sessions = createSqliteSessionStore();
+  const created = await sessions.create(userId);
+  const danglingCall = {
+    type: "tool-call" as const,
+    toolCallId: "call-9",
+    toolName: "Translate",
+    input: { text: "hello" },
+  };
+  const lateResult = {
+    type: "tool-result" as const,
+    toolCallId: "call-9",
+    toolName: "Translate",
+    output: { type: "json" as const, value: { translated_string: "你好" } },
+  };
+  await sessions.update(userId, created.id, {
+    messages: [
+      { role: "user", content: "translate the article" },
+      { role: "assistant", content: [danglingCall] },
+      { role: "user", content: "继续" },
+      { role: "tool", content: [lateResult] },
+    ],
+  });
+  let openedWith: readonly ModelMessage[] | undefined;
+
+  const result = await postNext(
+    userId,
+    { sessionId: created.id, userInput: "再继续" },
+    undefined,
+    sessions,
+    async (messages) => {
+      openedWith = messages;
+      return {
+        userInput: async (next) => {
+          openedWith = [...(openedWith ?? []), ...next];
+          return [];
+        },
+        addCopilotResponses() {},
+        async next() {
+          return {
+            nextActor: "user",
+            messages: [],
+            copilotRequests: [],
+            unprocessedToolCalls: [],
+          };
+        },
+      };
+    },
+  );
+
+  expect(result.status).toBe(200);
+  // 恢复进 agent 的历史：悬空调用后已补 interrupted 结果，迟到的孤儿结果被丢弃。
+  const roles = (openedWith ?? []).map((message) => message.role);
+  expect(roles).toEqual(["user", "assistant", "tool", "user", "user"]);
+  const stored = (await sessions.get(userId, created.id))?.messages;
+  expect(stored?.map((message) => message.role)).toEqual(["user", "assistant", "tool", "user", "user"]);
+  const settled = stored?.[2];
+  expect(settled).toMatchObject({ role: "tool" });
 });

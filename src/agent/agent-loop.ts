@@ -11,6 +11,7 @@ import {
 import { models } from "../ai/llm.js";
 import type { MemorySource } from "../memory/memory.js";
 import { Context, type CopilotResponseEntry } from "../messages/context.js";
+import { interruptedToolResultMessage } from "../messages/repair.js";
 import type { CopilotRequest, CopilotResponse } from "../prompts/system.memory.js";
 import { SYSTEM_WORKFLOW } from "../prompts/system.workflow.js";
 import { traceTool } from "../observability/langfuse.js";
@@ -33,6 +34,7 @@ export type AgentLoopNext = {
 
 export type AgentLoopEvent =
   | { type: "text-delta"; delta: string }
+  | { type: "reasoning-delta"; delta: string }
   | {
       type: "activity";
       id: string;
@@ -67,8 +69,26 @@ export class AgentLoop {
     this.context = source instanceof Context ? source : new Context(source);
   }
 
-  async userInput(messages: UserModelMessage[]): Promise<void> {
+  // 用户输入前先结算悬空的 tool call：普通工具立即执行；等待审核的调用视为被用户放弃，
+  // 补一个 interrupted 结果。否则 user 消息会插在 tool-call 和 tool-result 之间，
+  // 下一轮请求 provider 会直接报 “Tool result is missing for tool call …”。
+  // 返回结算过程新产生的消息（tool 结果 + 放弃标记），调用方按此顺序持久化。
+  async userInput(messages: UserModelMessage[]): Promise<ModelMessage[]> {
+    const settle: ModelMessage[] = [];
+    const pending = this.getUnprocessedToolCalls();
+    if (pending.length > 0) {
+      const step = await this.runTools(pending);
+      this.context.addMessages(step.messages);
+      settle.push(...step.messages);
+    }
+    const abandoned = this.getUnprocessedToolCalls();
+    if (abandoned.length > 0) {
+      const interrupted = interruptedToolResultMessage(abandoned);
+      this.context.addMessages([interrupted]);
+      settle.push(interrupted);
+    }
     this.context.addMessages(messages);
+    return settle;
   }
 
   addCopilotResponses(responses: readonly CopilotResponseEntry[]): void {
@@ -160,6 +180,8 @@ export class AgentLoop {
         for await (const part of result.stream) {
           if (part.type === "text-delta") {
             emit?.({ type: "text-delta", delta: part.text });
+          } else if (part.type === "reasoning-delta") {
+            emit?.({ type: "reasoning-delta", delta: part.text });
           } else if (part.type === "tool-input-start") {
             emit?.({
               type: "activity",

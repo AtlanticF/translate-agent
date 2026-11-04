@@ -2,6 +2,7 @@ import { requireUserId } from "../../../lib/request-auth";
 import { SessionNotFoundError } from "../../../lib/session";
 import { getSessionFileStore, getSessionStore } from "../../../lib/session-cloudflare";
 import { displaySessionTitle, readSessionTitle } from "../../../lib/session-title";
+import { isClientVisibleFile } from "../../../lib/next-turn";
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   const auth = await requireUserId(request);
@@ -18,7 +19,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   return Response.json({
     id: session.id,
     messages: session.messages,
-    files: await files.list(id),
+    files: (await files.list(id)).filter(isClientVisibleFile),
   });
 }
 

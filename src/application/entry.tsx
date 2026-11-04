@@ -23,7 +23,7 @@ import { UserScreen } from "./user-screen.js";
 export type AppSession = {
   loop: {
     next: (signal?: AbortSignal) => Promise<AgentLoopNext>;
-    userInput: (messages: UserModelMessage[]) => Promise<void>;
+    userInput: (messages: UserModelMessage[]) => Promise<ModelMessage[]>;
     getMessages: () => Promise<ModelMessage[]>;
   };
   context: {

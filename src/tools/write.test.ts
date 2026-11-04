@@ -39,6 +39,25 @@ test("rejects relative paths without calling the writer", async () => {
   expect(writer).not.toHaveBeenCalled();
 });
 
+test("rejects bulk content that belongs in the Translate workflow", async () => {
+  const writer = vi.fn();
+  const execute = createWriteExecutor(writer);
+
+  await expect(
+    execute({ file_path: "/tmp/full-translation.md", content: "译".repeat(2001) }, options),
+  ).rejects.toThrow("Translations must go through the 'Translate' tool");
+  expect(writer).not.toHaveBeenCalled();
+});
+
+test("allows small artifacts under the limit", async () => {
+  const writer = vi.fn(async ({ file_path }: { file_path: string }) => ({ file_path }));
+  const execute = createWriteExecutor(writer);
+
+  await execute({ file_path: "/tmp/note.md", content: "n".repeat(2000) }, options);
+
+  expect(writer).toHaveBeenCalledOnce();
+});
+
 test("exposes the Write tool name", () => {
   expect(writeTool.name).toBe("Write");
 });

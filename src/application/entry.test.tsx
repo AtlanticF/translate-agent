@@ -100,6 +100,7 @@ test("user submit records the message before the loop continues", async () => {
   const current = session({
     async userInput(messages) {
       events.push(`input:${String(messages[0]?.content)}`);
+      return [];
     },
     async next() {
       events.push("next");
@@ -213,7 +214,9 @@ function session(overrides: Partial<AppSession["loop"]> = {}): AppSession {
       async next() {
         return step("user");
       },
-      async userInput() {},
+      async userInput() {
+        return [];
+      },
       async getMessages() {
         return [];
       },

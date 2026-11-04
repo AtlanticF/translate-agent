@@ -39,6 +39,7 @@ import {
   TraceCollapsible,
   TraceCollapsibleContent,
   TraceCollapsibleTrigger,
+  TraceDescription,
   TraceIcon,
   TraceLine,
   TraceTitle,
@@ -72,7 +73,9 @@ export default function Home() {
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
   const [liveText, setLiveText] = useState("");
+  const [liveReasoning, setLiveReasoning] = useState("");
   const [liveActivities, setLiveActivities] = useState<LiveActivity[]>([]);
+  const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState<string | undefined>();
   const [reveal, setReveal] = useState<"restore" | "live">("live");
   const pending = useRef(false);
@@ -93,9 +96,11 @@ export default function Home() {
   const transientActivities = liveActivities.filter(
     (activity) => !items.some((item) => item.kind === "tool" && item.id === activity.id),
   );
+  const thinking = busy && !liveText && liveReasoning.length > 0;
   const waitingForActivity =
     busy &&
     !liveText &&
+    !thinking &&
     liveActivities.length === 0 &&
     !items.some((item) => item.kind === "tool" && item.state === "running");
   const reviewing = requests.length > 0;
@@ -113,6 +118,19 @@ export default function Home() {
     return () => window.clearTimeout(timer);
   }, [reveal]);
 
+  // 处理中的耗时计时，让用户在等待 SSE 事件之间也能感知进展。
+  useEffect(() => {
+    if (!busy) {
+      return;
+    }
+    const startedAt = Date.now();
+    setElapsed(0);
+    const timer = window.setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [busy]);
+
   function newSession() {
     if (pending.current) {
       return;
@@ -127,6 +145,7 @@ export default function Home() {
     setDraft("");
     setFiles([]);
     setLiveText("");
+    setLiveReasoning("");
     setLiveActivities([]);
     setError(undefined);
   }
@@ -208,6 +227,7 @@ export default function Home() {
       setDecisions({});
       setDraft("");
       setLiveText("");
+      setLiveReasoning("");
       setLiveActivities([]);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -323,12 +343,24 @@ export default function Home() {
                       </Message>
                     </MessageScrollerItem>
                   ) : null}
+                  {thinking ? (
+                    <MessageScrollerItem
+                      messageId="thinking"
+                      className={enterClass("assistant")}
+                      style={enterStyle(items.length + (liveText ? 1 : 0), reveal)}
+                    >
+                      <ThinkingTrace reasoning={liveReasoning} elapsed={elapsed} />
+                    </MessageScrollerItem>
+                  ) : null}
                   {transientActivities.map((activity, index) => (
                     <MessageScrollerItem
                       key={activity.id}
                       messageId={`live-activity-${activity.id}`}
                       className={enterClass("tool")}
-                      style={enterStyle(items.length + index + (liveText ? 1 : 0), reveal)}
+                      style={enterStyle(
+                        items.length + index + (liveText || thinking ? 1 : 0),
+                        reveal,
+                      )}
                     >
                       <ActivityTrace activity={activity} />
                     </MessageScrollerItem>
@@ -345,6 +377,7 @@ export default function Home() {
                             <Loader2Icon className="animate-spin" />
                           </TraceIcon>
                           <TraceTitle>Processing</TraceTitle>
+                          <TraceDescription>{formatElapsed(elapsed)}</TraceDescription>
                         </TraceLine>
                       </Trace>
                     </MessageScrollerItem>
@@ -498,6 +531,7 @@ export default function Home() {
     setBusy(true);
     setError(undefined);
     setLiveText("");
+    setLiveReasoning("");
     setLiveActivities([]);
     try {
       await runTurns(
@@ -505,6 +539,7 @@ export default function Home() {
         body,
         (step) => {
           setLiveText("");
+          setLiveReasoning("");
           setLiveActivities([]);
           setSessionId(step.sessionId);
           if (step.files) {
@@ -524,6 +559,9 @@ export default function Home() {
             setSessionId(event.sessionId);
           } else if (event.type === "text-delta") {
             setLiveText((current) => current + event.delta);
+          } else if (event.type === "reasoning-delta") {
+            // 只保留末尾片段，思考内容不做重点展示。
+            setLiveReasoning((current) => (current + event.delta).slice(-160));
           } else {
             setLiveActivities((current) => {
               const index = current.findIndex((activity) => activity.id === event.id);
@@ -542,6 +580,7 @@ export default function Home() {
     } finally {
       setBusy(false);
       setLiveText("");
+      setLiveReasoning("");
       setLiveActivities([]);
       void loadSessions();
     }
@@ -612,6 +651,30 @@ function downloadHref(sessionId: string | undefined, fileId: string): string {
     return "#";
   }
   return `/sessions/${sessionId}/files/${fileId}/translated`;
+}
+
+// 思考过程一行带过：扫光标题 + 实时片段 + 计时（参考 ChatGPT/Cursor 的折叠思考态）。
+function ThinkingTrace({ reasoning, elapsed }: { reasoning: string; elapsed: number }) {
+  return (
+    <Trace>
+      <TraceLine status="running">
+        <TraceIcon>
+          <Loader2Icon className="animate-spin" />
+        </TraceIcon>
+        <TraceTitle>正在思考</TraceTitle>
+        <span className="min-w-0 truncate text-xs text-muted-foreground/70">{reasoning}</span>
+        <TraceDescription>{formatElapsed(elapsed)}</TraceDescription>
+      </TraceLine>
+    </Trace>
+  );
+}
+
+function formatElapsed(totalSeconds: number): string {
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+  const minutes = Math.floor(totalSeconds / 60);
+  return `${minutes}m${String(totalSeconds % 60).padStart(2, "0")}s`;
 }
 
 function ActivityTrace({ activity }: { activity: LiveActivity }) {

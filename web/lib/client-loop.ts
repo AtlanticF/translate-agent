@@ -28,7 +28,7 @@ export type ClientTurn = {
 
 export type ClientLiveEvent = Extract<
   NextTurnEvent,
-  { type: "start" | "text-delta" | "activity" }
+  { type: "start" | "text-delta" | "reasoning-delta" | "activity" }
 >;
 export type ClientLiveEventHandler = (event: ClientLiveEvent) => void;
 
