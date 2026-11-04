@@ -128,6 +128,7 @@ test("reads live events across arbitrary response chunks", async () => {
   const encoded = new TextEncoder();
   const events = [
     { type: "start", sessionId: "s1" },
+    { type: "reasoning-delta", delta: "thinking" },
     { type: "text-delta", delta: "do" },
     { type: "activity", id: "call-1", kind: "tool", name: "Read", state: "running" },
     { type: "done", turn },
@@ -152,7 +153,7 @@ test("reads live events across arbitrary response chunks", async () => {
   const result = await postNextTurn({ userInput: "go" }, (event) => live.push(event));
 
   expect(result).toEqual(turn);
-  expect(live).toEqual(events.slice(0, 3));
+  expect(live).toEqual(events.slice(0, 4));
   expect(fetchMock).toHaveBeenCalledWith("/next", {
     method: "POST",
     headers: { "content-type": "application/json" },

@@ -1,6 +1,7 @@
 import { APICallError, RetryError, type ModelMessage, type UserModelMessage } from "ai";
 import type { AgentLoopEvent, AgentLoopEventHandler, AgentLoopNext } from "../../src/agent/agent-loop";
 import type { CopilotResponseEntry } from "../../src/messages/context";
+import { settleInterruptedToolCalls } from "../../src/messages/repair";
 import { withTrace } from "../../src/observability/langfuse";
 import { omitDoneFilePaths, withImportedFiles } from "./imported-files";
 import type { SessionFileStatus } from "./session-files";
@@ -40,7 +41,7 @@ export type NextTurnEvent =
 export type NextTurnEventHandler = (event: NextTurnEvent) => void;
 
 type TurnAgent = {
-  userInput(messages: UserModelMessage[]): Promise<void>;
+  userInput(messages: UserModelMessage[]): Promise<ModelMessage[]>;
   addCopilotResponses(responses: readonly CopilotResponseEntry[]): void;
   next(signal?: AbortSignal, emit?: AgentLoopEventHandler): Promise<AgentLoopNext>;
 };
@@ -69,23 +70,31 @@ export async function postNext(
 
   const imported = files ? await files.list(session.id) : [];
   const donePaths = imported.filter((file) => file.status === "done").map((file) => file.path);
-  const agent = await openAgent(omitDoneFilePaths(session.messages, donePaths), session.id);
-  const userInput = request.userInput?.trim();
-  if (userInput) {
-    const pending = imported.filter((file) => file.status !== "done").map((file) => file.path);
-    const messages: UserModelMessage[] = [{ role: "user", content: withImportedFiles(userInput, pending) }];
-    session = await sessions.update(userId, session.id, {
-      messages: [...session.messages, ...messages],
-    });
-    await agent.userInput(messages);
+  // 修复历史里 tool-call 与 tool-result 被 user 消息隔开的协议违规（中断恢复产生）。
+  const restored = settleInterruptedToolCalls(omitDoneFilePaths(session.messages, donePaths));
+  if (restored !== session.messages) {
+    session = await sessions.update(userId, session.id, { messages: [...restored] });
   }
+  const agent = await openAgent(restored, session.id);
 
+  // 审核响应先于新输入处理，避免同一请求里既带审核又放弃旧调用。
   const pendingResponses = request.copilotResponses ?? [];
   if (pendingResponses.length > 0) {
     session = await sessions.update(userId, session.id, {
       copilotResponses: [...session.copilotResponses, ...pendingResponses],
     });
     agent.addCopilotResponses(pendingResponses);
+  }
+
+  const userInput = request.userInput?.trim();
+  if (userInput) {
+    const pending = imported.filter((file) => file.status !== "done").map((file) => file.path);
+    const messages: UserModelMessage[] = [{ role: "user", content: withImportedFiles(userInput, pending) }];
+    // userInput 先结算悬空的 tool call，产生的消息必须先于用户消息落库，保持协议顺序。
+    const settled = await agent.userInput(messages);
+    session = await sessions.update(userId, session.id, {
+      messages: [...session.messages, ...settled, ...messages],
+    });
   }
 
   let step: AgentLoopNext;
@@ -135,6 +144,12 @@ function findApiCallError(error: unknown): APICallError | undefined {
   return undefined;
 }
 
+// text/html 是 URL 翻译流程的服务端中间产物，不进 UI 文件列表。
+// /next 的 fileList 和会话 GET 路由都要用它过滤。
+export function isClientVisibleFile(file: { mediaType?: string }): boolean {
+  return file.mediaType !== "text/html";
+}
+
 function fileList(
   files: ReadonlyArray<
     { path: string; status?: SessionFileStatus; mediaType?: string } & Partial<TurnFile>
@@ -145,8 +160,7 @@ function fileList(
     if (!file.id || !file.name) {
       continue;
     }
-    // text/html 是 URL 翻译流程的服务端中间产物，不进 UI 文件列表。
-    if (file.mediaType === "text/html") {
+    if (!isClientVisibleFile(file)) {
       continue;
     }
     const status = file.status === "done" ? "done" : "open";

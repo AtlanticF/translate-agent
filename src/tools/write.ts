@@ -15,14 +15,18 @@ export type WriteOutput = {
 
 export type WriteWriter = (input: WriteInput) => Promise<WriteOutput>;
 
-const description = `Write UTF-8 text to a file.
+// Write 只用于小的非翻译产物；整篇译文必须走 Translate 逐段出，否则会绕过用户审核且请求会超时。
+const maxWriteChars = 2000;
 
-Use this tool to save converted Markdown before translation. The file path must be absolute. Always use the returned file_path for subsequent Read and Translate calls because an environment-specific writer may return a different path.`;
+const description = `Write a small, non-translation text artifact to a file.
+
+The file path must be absolute. Always use the returned file_path for subsequent Read and Translate calls because an environment-specific writer may return a different path.
+NEVER use this tool to write translated content: translations must be produced only through the 'Translate' tool, one unit per call. Large writes (over ${maxWriteChars} characters) are rejected.`;
 
 const inputSchema = zodSchema(
   z.object({
     file_path: z.string().describe("Absolute destination path or suggested session file path."),
-    content: z.string().describe("UTF-8 text to write."),
+    content: z.string().describe("UTF-8 text to write. Not for translations; use Translate instead."),
   }),
 );
 
@@ -36,6 +40,11 @@ export function createWriteExecutor(writer: WriteWriter = writeLocalFile): ToolE
   return async (input) => {
     if (!isAbsolute(input.file_path)) {
       throw new Error("file_path must be an absolute path");
+    }
+    if (input.content.length > maxWriteChars) {
+      throw new Error(
+        `content exceeds ${maxWriteChars} characters. Translations must go through the 'Translate' tool one unit at a time; do not bulk-write translations with Write.`,
+      );
     }
     return { type: "json", payload: await writer(input) };
   };

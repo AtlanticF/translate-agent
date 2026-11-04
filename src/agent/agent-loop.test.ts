@@ -35,6 +35,100 @@ test("restores the loop from messages", async () => {
   await expect(loop.getMessages()).resolves.toEqual(messages);
 });
 
+test("user input settles a pending tool call before the user message", async () => {
+  const executor = vi.fn<ToolExecutor>(async () => ({
+    type: "json",
+    payload: { value: "settled" },
+  }));
+  const loop = new AgentLoop(
+    {},
+    { Read: executor },
+    new Context([
+      {
+        role: "assistant",
+        content: [
+          { type: "tool-call", toolCallId: "call-1", toolName: "Read", input: { file_path: "/tmp/a" } },
+        ],
+      },
+    ]),
+  );
+
+  const settled = await loop.userInput([{ role: "user", content: "继续" }]);
+
+  expect(executor).toHaveBeenCalledOnce();
+  expect(settled).toHaveLength(1);
+  expect(settled[0]).toMatchObject({ role: "tool" });
+  await expect(loop.getMessages()).resolves.toEqual([
+    {
+      role: "assistant",
+      content: [
+        { type: "tool-call", toolCallId: "call-1", toolName: "Read", input: { file_path: "/tmp/a" } },
+      ],
+    },
+    { role: "tool", content: [expect.anything()] },
+    { role: "user", content: "继续" },
+  ]);
+});
+
+test("user input abandons a pending review-gated tool call", async () => {
+  streamTextMock.mockReturnValue({
+    stream: emptyStream(),
+    toolCalls: [],
+    finishReason: "stop",
+    finalStep: { response: { messages: [{ role: "assistant", content: "ok" }] } },
+  } as unknown as Awaited<ReturnType<typeof streamText>>);
+  const request: CopilotRequest = {
+    src_string: "hello",
+    translate_string: "你好",
+    file_path: "/tmp/readme",
+    tool: { name: "Translate", callId: "call-1" },
+  };
+  const executor = vi.fn<ToolExecutor>(async () => ({
+    type: "copilot-request",
+    payload: request,
+  }));
+  const loop = new AgentLoop(
+    {},
+    { Translate: executor },
+    new Context([
+      {
+        role: "assistant",
+        content: [
+          { type: "tool-call", toolCallId: "call-1", toolName: "Translate", input: { text: "hello" } },
+        ],
+      },
+    ]),
+  );
+
+  const settled = await loop.userInput([{ role: "user", content: "继续" }]);
+
+  expect(settled).toHaveLength(1);
+  const interrupted = settled[0] as { role: string; content: Array<Record<string, unknown>> };
+  expect(interrupted.role).toBe("tool");
+  expect(interrupted.content[0]).toMatchObject({
+    type: "tool-result",
+    toolCallId: "call-1",
+    output: { type: "error-text" },
+  });
+  const messages = await loop.getMessages();
+  expect(messages[messages.length - 1]).toEqual({ role: "user", content: "继续" });
+  // 被放弃的调用不再挂起，后续 next() 会直接询问模型而不是重跑工具。
+  const result = await loop.next();
+  expect(result.unprocessedToolCalls).toEqual([]);
+});
+
+test("user input without pending calls only appends the message", async () => {
+  const loop = new AgentLoop({}, {}, new Context([{ role: "user", content: "hello" }]));
+
+  const settled = await loop.userInput([{ role: "user", content: "继续" }]);
+
+  expect(settled).toEqual([]);
+  await expect(loop.getMessages()).resolves.toEqual([
+    { role: "user", content: "hello" },
+    { role: "user", content: "继续" },
+  ]);
+});
+
 test("asks the user when the context is empty", async () => {
   const context = new Context();
   const loop = new AgentLoop({}, {}, context);
@@ -94,6 +188,7 @@ test("stores user messages and returns the model reply", async () => {
 test("emits transient model events and returns the same finished step", async () => {
   streamTextMock.mockReturnValue({
     stream: (async function* () {
+      yield { type: "reasoning-delta", id: "reasoning-1", text: "reading the file first" };
       yield { type: "text-delta", id: "text-1", text: "do" };
       yield { type: "text-delta", id: "text-1", text: "ne" };
       yield { type: "tool-input-start", id: "model-1", toolName: "Read" };
@@ -112,6 +207,7 @@ test("emits transient model events and returns the same finished step", async ()
   const result = await loop.next(undefined, (event) => events.push(event));
 
   expect(events).toEqual([
+    { type: "reasoning-delta", delta: "reading the file first" },
     { type: "text-delta", delta: "do" },
     { type: "text-delta", delta: "ne" },
     { type: "activity", id: "model-1", kind: "tool", name: "Read", state: "preparing" },
