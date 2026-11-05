@@ -48,6 +48,7 @@ type TurnAgent = {
 
 export type ImportedFileList = {
   list(sessionId: string): Promise<Array<{ path: string; status?: SessionFileStatus } & Partial<TurnFile>>>;
+  resumeInfo?(filePath: string): Promise<{ line: number; excerpt: string } | undefined>;
 };
 
 export async function postNext(
@@ -89,7 +90,21 @@ export async function postNext(
   const userInput = request.userInput?.trim();
   if (userInput) {
     const pending = imported.filter((file) => file.status !== "done").map((file) => file.path);
-    const messages: UserModelMessage[] = [{ role: "user", content: withImportedFiles(userInput, pending) }];
+    // 续翻提示：告知模型第一个未翻译单元的位置，避免从头重复翻译。
+    let partial: { line: number; excerpt: string } | undefined;
+    const resume = files?.resumeInfo?.bind(files);
+    if (resume && pending.length > 0) {
+      for (const path of pending) {
+        const info = await resume(path);
+        if (info) {
+          partial = info;
+          break;
+        }
+      }
+    }
+    const messages: UserModelMessage[] = [
+      { role: "user", content: withImportedFiles(userInput, pending, partial) },
+    ];
     // userInput 先结算悬空的 tool call，产生的消息必须先于用户消息落库，保持协议顺序。
     const settled = await agent.userInput(messages);
     session = await sessions.update(userId, session.id, {

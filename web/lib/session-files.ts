@@ -41,6 +41,11 @@ export type SessionFile = {
   createdAt: Date;
 };
 
+export type ResumeInfo = {
+  line: number;
+  excerpt: string;
+};
+
 export type SessionFileStore = {
   add(
     sessionId: string,
@@ -51,6 +56,10 @@ export type SessionFileStore = {
   readOriginalText(filePath: string): Promise<string>;
   appendTranslated(filePath: string, translated: string, source?: SourceSpan): Promise<void>;
   readTranslated(sessionId: string, fileId: string): Promise<string>;
+  // 已审核通过并落库的源文覆盖区间，用于识别重复翻译和续翻位置。
+  translatedSpans(filePath: string): Promise<[number, number][] | undefined>;
+  // 第一个未翻译的非空白位置（行号 + 摘录），全部译完返回 undefined。
+  resumeInfo(filePath: string): Promise<ResumeInfo | undefined>;
   removeSession(sessionId: string): Promise<void>;
 };
 
@@ -141,6 +150,10 @@ export function createSessionFileStore(
       if (!row) {
         throw new Error(`File not found: ${filePath}`);
       }
+      // 幂等保护：源文区间已全部覆盖说明这段早已翻译过，重复追加会产生重复译文。
+      if (source && isSpanCovered(row.covered ?? [], source.start, source.end)) {
+        return;
+      }
       const key = translatedKey(parsed.sessionId, parsed.fileId);
       const current = await bucket.get(key);
       const text = current ? await current.text() : "";
@@ -160,6 +173,51 @@ export function createSessionFileStore(
           status: done ? "done" : "open",
         })
         .where(and(eq(sessionFiles.sessionId, parsed.sessionId), eq(sessionFiles.id, parsed.fileId)));
+    },
+
+    async translatedSpans(filePath) {
+      const parsed = parseImportedFilePath(filePath);
+      if (!parsed) {
+        return undefined;
+      }
+      const row = await db
+        .select()
+        .from(sessionFiles)
+        .where(and(eq(sessionFiles.sessionId, parsed.sessionId), eq(sessionFiles.id, parsed.fileId)))
+        .get();
+      if (!row) {
+        return undefined;
+      }
+      return mergeRanges(row.covered ?? []);
+    },
+
+    async resumeInfo(filePath) {
+      const parsed = parseImportedFilePath(filePath);
+      if (!parsed) {
+        return undefined;
+      }
+      const row = await db
+        .select()
+        .from(sessionFiles)
+        .where(and(eq(sessionFiles.sessionId, parsed.sessionId), eq(sessionFiles.id, parsed.fileId)))
+        .get();
+      if (!row) {
+        return undefined;
+      }
+      const covered = mergeRanges(row.covered ?? []);
+      if (covered.length === 0) {
+        return undefined;
+      }
+      const original = await bucket.get(originalKey(parsed.sessionId, parsed.fileId));
+      const sourceText = original ? await original.text() : "";
+      const offset = firstUncoveredOffset(sourceText, covered);
+      if (offset === undefined) {
+        return undefined;
+      }
+      return {
+        line: sourceText.slice(0, offset).split("\n").length,
+        excerpt: firstLine(sourceText.slice(offset, offset + 120)),
+      };
     },
 
     async readTranslated(sessionId, fileId) {
@@ -246,8 +304,45 @@ function translatedKey(sessionId: string, fileId: string): string {
   return `sessions/${sessionId}/${fileId}/translated`;
 }
 
-export function mergeRanges(ranges: readonly (readonly [number, number])[]): [number, number][] {
-  const sorted = ranges
+// [start, end) 是否已被某个覆盖区间完整包含。
+function isSpanCovered(ranges: readonly (readonly [number, number])[], start: number, end: number): boolean {
+  if (end <= start) {
+    return false;
+  }
+  return mergeRanges(ranges).some(([s, e]) => s <= start && end <= e);
+}
+
+// 第一个未翻译的非空白字符位置；全被覆盖（或只剩空白）返回 undefined。
+// 段落之间的换行/空白可能不在任何区间内，它们不算未翻译。
+function firstUncoveredOffset(
+  text: string,
+  ranges: readonly (readonly [number, number])[],
+): number | undefined {
+  const merged = mergeRanges(ranges);
+  let cursor = 0;
+  const gapStart = (segment: string, at: number): number | undefined =>
+    segment.trim().length > 0 ? at + (segment.length - segment.trimStart().length) : undefined;
+  for (const [start, end] of merged) {
+    if (start > cursor) {
+      const found = gapStart(text.slice(cursor, start), cursor);
+      if (found !== undefined) {
+        return found;
+      }
+    }
+    cursor = Math.max(cursor, end);
+  }
+  if (cursor < text.length) {
+    return gapStart(text.slice(cursor), cursor);
+  }
+  return undefined;
+}
+
+function firstLine(text: string): string {
+  const line = text.split("\n", 1)[0] ?? "";
+  return line.trim().slice(0, 80);
+}
+
+export function mergeRanges(ranges: readonly (readonly [number, number])[]): [number, number][] {  const sorted = ranges
     .filter(([start, end]) => end > start)
     .map(([start, end]): [number, number] => [start, end])
     .sort((left, right) => left[0] - right[0] || left[1] - right[1]);
