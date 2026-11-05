@@ -9,7 +9,7 @@ import { requireUserId } from "../../lib/request-auth";
 import type { SessionStore } from "../../lib/session";
 import { getSessionFileStore, getSessionStore } from "../../lib/session-cloudflare";
 import {
-  ownedAppendTranslated,
+  ownedApplyTranslated,
   ownedReadOriginalText,
   type SessionFileStore,
 } from "../../lib/session-files";
@@ -105,7 +105,7 @@ async function openLoop(
 ) {
   const session = await import("../../lib/agent-session.js");
   const readImported = ownedReadOriginalText(context.sessions, context.files, context.userId);
-  const appendTranslated = ownedAppendTranslated(context.sessions, context.files, context.userId);
+  const applyTranslated = ownedApplyTranslated(context.sessions, context.files, context.userId);
   // Web 工具链的中间产物（raw/clean HTML、markdown）都存在 session file store，
   // 模型只拿 file_path，避免在 tool call 参数里回显大段 HTML。
   const webFiles: WebFileIO = {
@@ -127,7 +127,7 @@ async function openLoop(
           ? context.skills.fs.readFile(filePath)
           : readImported(filePath),
       write: async ({ file_path, translated_string, source_start, source_end }) => {
-        await appendTranslated(file_path, translated_string, {
+        await applyTranslated(file_path, translated_string, {
           start: source_start,
           end: source_end,
         });
