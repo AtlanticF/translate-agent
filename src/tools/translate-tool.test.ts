@@ -13,12 +13,57 @@ const input = {
 };
 const options = { name: "Translate", callId: "call-1" };
 
+function executorBase(
+  writer: TranslateWriter,
+  read: (filePath: string) => Promise<string>,
+  covered: (filePath: string) => Promise<readonly (readonly [number, number])[]>,
+) {
+  return { writer, run: createTranslateExecutor({ writer, read, covered }) };
+}
+
 function executor(
   writer: TranslateWriter = vi.fn(async () => {}),
   read: (filePath: string) => Promise<string> = async () => "hello",
 ) {
   return { writer, run: createTranslateExecutor({ writer, read }) };
 }
+
+test("skips a unit whose source span is already translated", async () => {
+  const { writer, run } = executorBase(
+    vi.fn(async () => {}),
+    async () => "hello world",
+    async () => [[0, 5]],
+  );
+
+  const result = await run(input, options, { status: "approve" });
+
+  expect(result).toEqual({
+    type: "json",
+    payload: {
+      translated_string: "你好",
+      status: "approve",
+      reason: expect.stringContaining("already translated"),
+    },
+  });
+  expect(writer).not.toHaveBeenCalled();
+});
+
+test("keeps translating when the covered spans do not include the unit", async () => {
+  const writer = vi.fn(async () => {});
+  const { run } = executorBase(
+    writer,
+    async () => "hello world",
+    async () => [[6, 11]],
+  );
+
+  const result = await run(input, options, { status: "approve" });
+
+  expect(result).toEqual({
+    type: "json",
+    payload: { translated_string: "你好", status: "approve", reason: "" },
+  });
+  expect(writer).toHaveBeenCalledOnce();
+});
 
 test("is the Translate tool", () => {
   expect(translateTool).toMatchObject({

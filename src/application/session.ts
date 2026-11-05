@@ -13,6 +13,7 @@ import { createReadExecutor, readExecutor, readTool } from "../tools/read-tool.j
 import {
   createTranslateExecutor,
   translateTool,
+  type TranslateCovered,
   type TranslateReader,
   type TranslateWriter,
 } from "../tools/translate-tool.js";
@@ -56,6 +57,7 @@ export async function createSession(
 export type LoopIO = {
   read?: TranslateReader;
   write?: TranslateWriter;
+  covered?: TranslateCovered;
   writeFile?: WriteWriter;
   ls?: (path: string) => Promise<readonly SkillDirEntry[]>;
   webFiles?: WebFileIO;
@@ -95,6 +97,7 @@ function toolExecutors(io: LoopIO = {}) {
     Translate: createTranslateExecutor({
       writer: io.write ?? writeTranslation,
       read: io.read,
+      covered: io.covered,
     }),
     WebFetch: createWebFetchExecutor(fetch, io.webFiles),
     webDocTransfer: createWebDocTransferExecutor(io.webFiles),
