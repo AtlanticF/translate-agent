@@ -249,3 +249,59 @@ function memoryBucket(): ObjectBucket & { objects: Map<string, Uint8Array> } {
     },
   };
 }
+
+test("applyTranslated is idempotent for an already covered span", async () => {
+  const { files } = openStore();
+  const saved = await files.add("session-1", {
+    name: "a.txt",
+    mediaType: "text/plain",
+    bytes: new TextEncoder().encode("hello world"),
+  });
+
+  await files.applyTranslated(saved.path, "你好", { start: 0, end: 5 });
+  // 同一区间重复审核通过（中断重放）不再写入第二份译文。
+  await files.applyTranslated(saved.path, "你好", { start: 0, end: 5 });
+
+  expect(await files.readTranslated("session-1", saved.id)).toBe("你好 world");
+  expect(await files.translatedSpans(saved.path)).toEqual([[0, 5]]);
+});
+
+test("translatedSpans returns undefined for unknown paths", async () => {
+  const { files } = openStore();
+
+  expect(await files.translatedSpans("/sessions/s/files/missing/a.txt")).toBeUndefined();
+  expect(await files.translatedSpans("/tmp/local.md")).toBeUndefined();
+});
+
+test("resumeInfo points at the first untranslated text", async () => {
+  const { files } = openStore();
+  const source = "para one\n\npara two\n\npara three";
+  const saved = await files.add("session-1", {
+    name: "a.txt",
+    mediaType: "text/plain",
+    bytes: new TextEncoder().encode(source),
+  });
+
+  expect(await files.resumeInfo(saved.path)).toBeUndefined();
+
+  await files.applyTranslated(saved.path, "第一段", { start: 0, end: "para one".length });
+
+  const info = await files.resumeInfo(saved.path);
+  expect(info?.line).toBe(3);
+  expect(info?.excerpt).toBe("para two");
+});
+
+test("resumeInfo is undefined when everything is translated", async () => {
+  const { files } = openStore();
+  const source = "one two";
+  const saved = await files.add("session-1", {
+    name: "a.txt",
+    mediaType: "text/plain",
+    bytes: new TextEncoder().encode(source),
+  });
+
+  await files.applyTranslated(saved.path, "一", { start: 0, end: 3 });
+  await files.applyTranslated(saved.path, "二", { start: 4, end: 7 });
+
+  expect(await files.resumeInfo(saved.path)).toBeUndefined();
+});

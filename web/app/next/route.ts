@@ -13,6 +13,7 @@ import {
   ownedReadOriginalText,
   type SessionFileStore,
 } from "../../lib/session-files";
+import type { TranslateCovered } from "../../../src/tools/translate-tool";
 import { isSkillsPath, loadWebSkills, type LoadedSkills } from "../../lib/skills";
 import { skillsBundle } from "../../lib/skills-bundle";
 
@@ -106,6 +107,11 @@ async function openLoop(
   const session = await import("../../lib/agent-session.js");
   const readImported = ownedReadOriginalText(context.sessions, context.files, context.userId);
   const applyTranslated = ownedApplyTranslated(context.sessions, context.files, context.userId);
+  // 已翻译的源文覆盖区间，供 Translate 识别重复段落（续翻防重复）。
+  const coveredSpans: TranslateCovered = async (filePath) => {
+    const spans = await context.files.translatedSpans(filePath);
+    return spans ?? [];
+  };
   // Web 工具链的中间产物（raw/clean HTML、markdown）都存在 session file store，
   // 模型只拿 file_path，避免在 tool call 参数里回显大段 HTML。
   const webFiles: WebFileIO = {
@@ -132,6 +138,7 @@ async function openLoop(
           end: source_end,
         });
       },
+      covered: coveredSpans,
       writeFile: async ({ file_path, content }) => {
         const saved = await context.files.add(context.sessionId, {
           name: path.basename(file_path) || "article.md",

@@ -1,10 +1,22 @@
 export const importedFilesMarker = "\n\nImported files:\n";
 
-export function withImportedFiles(userInput: string, paths: readonly string[]): string {
-  if (paths.length === 0) {
-    return userInput;
+export const resumeMarker = "\n\nResume at:";
+
+// 为一条用户消息附加导入文件列表；partial 提供时额外带上续翻位置提示，
+// 帮助模型从第一个未翻译的单元继续，而不是从头重复翻译。
+export function withImportedFiles(
+  userInput: string,
+  paths: readonly string[],
+  partial?: { line: number; excerpt: string },
+): string {
+  let text = userInput;
+  if (paths.length > 0) {
+    text = `${text}${importedFilesMarker}${paths.join("\n")}`;
   }
-  return `${userInput}${importedFilesMarker}${paths.join("\n")}`;
+  if (partial) {
+    text = `${text}${resumeMarker} line ${partial.line} starts with "${partial.excerpt}". Continue translating from there; paragraphs before it are already translated — do not translate them again.`;
+  }
+  return text;
 }
 
 export function withoutImportedFiles(content: string, donePaths: ReadonlySet<string>): string {
@@ -42,7 +54,9 @@ export function omitDoneFilePaths<T extends { role: string; content: unknown }>(
     if (message.role !== "user" || typeof message.content !== "string") {
       return message;
     }
-    const content = withoutImportedFiles(message.content, done);
+    // 历史里的续翻提示随文件完成一并清掉，避免上下文里积累过期的行号。
+    let content = withoutResumeHint(message.content);
+    content = withoutImportedFiles(content, done);
     if (content === message.content) {
       return message;
     }
@@ -50,4 +64,9 @@ export function omitDoneFilePaths<T extends { role: string; content: unknown }>(
     return { ...message, content };
   });
   return changed ? next : messages;
+}
+
+function withoutResumeHint(content: string): string {
+  const index = content.lastIndexOf(resumeMarker);
+  return index < 0 ? content : content.slice(0, index);
 }

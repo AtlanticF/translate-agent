@@ -27,6 +27,9 @@ export type TranslateWriter = (params: {
 
 export type TranslateReader = (filePath: string) => Promise<string>;
 
+// 返回该文件已翻译的源文覆盖区间（字符偏移）。web 端源文件不可变，用它识别重复翻译。
+export type TranslateCovered = (filePath: string) => Promise<readonly (readonly [number, number])[]>;
+
 const maxSourceLength = 300;
 
 const description = `Create translation units for documents to be translated. According to the current context's requirements, select a limited amount of text each time for translation. During translation, follow the user's requirements including target language, tone, and terminology.
@@ -83,9 +86,11 @@ export const translateTool = Object.assign(
 export function createTranslateExecutor({
   writer,
   read = readTranslation,
+  covered,
 }: {
   writer: TranslateWriter;
   read?: TranslateReader;
+  covered?: TranslateCovered;
 }): ToolExecutor<TranslateInput> {
   return async (input, options, copilotResponse) => {
     if (!isAbsolute(input.file_path)) {
@@ -100,6 +105,24 @@ export function createTranslateExecutor({
     const found = findUnique(text, input.src_string);
     if ("reason" in found) {
       return reject(found.reason);
+    }
+
+    // 源文区间已翻译过（续翻场景常见）：直接按完成返回，不再发起审核，也不重复写入。
+    if (covered) {
+      const spans = await covered(input.file_path);
+      const start = found.start;
+      const end = found.start + input.src_string.length;
+      const already = spans.some(([s, e]) => s <= start && end <= e);
+      if (already) {
+        return {
+          type: "json",
+          payload: {
+            translated_string: input.translate_string,
+            status: "approve",
+            reason: "src_string was already translated earlier; skipped as duplicate. Continue with the next untranslated unit.",
+          },
+        };
+      }
     }
 
     if (!copilotResponse) {
