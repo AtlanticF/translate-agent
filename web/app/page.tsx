@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { ModelMessage } from "ai";
-import { Loader2Icon, PaperclipIcon, TerminalIcon, Trash2Icon } from "lucide-react";
+import { ArrowDownToLineIcon, ArrowUpIcon, CheckIcon, FileTextIcon, LanguagesIcon, Loader2Icon, PaperclipIcon, TerminalIcon, Trash2Icon, UploadCloudIcon, XIcon } from "lucide-react";
+import { cn } from "cn";
+import { Button } from "@/components/ui/button";
 import { CopilotReview } from "@/components/copilot-review";
 import { SessionSidebar } from "@/components/session-sidebar";
 import { Welcome } from "@/components/welcome";
@@ -29,6 +31,7 @@ import { Message, MessageContent } from "@/components/ui/message";
 import { Progress } from "@/components/ui/progress";
 import {
   MessageScroller,
+  MessageScrollerButton,
   MessageScrollerContent,
   MessageScrollerItem,
   MessageScrollerProvider,
@@ -44,7 +47,7 @@ import {
   TraceLine,
   TraceTitle,
 } from "@/components/ui/trace";
-import { inputPlaceholder, submittedUserText } from "../../shared/welcome";
+import { submittedUserText } from "../../shared/welcome";
 import type { CopilotReviewResponse } from "../lib/copilot-batch";
 import { noteCopilotDecision } from "../lib/copilot-batch";
 import { pendingCopilotRequests } from "../lib/pending-copilot";
@@ -81,8 +84,11 @@ export default function Home() {
   const [error, setError] = useState<string | undefined>();
   const [reveal, setReveal] = useState<"restore" | "live">("live");
   const [restoring, setRestoring] = useState(true);
+  const [uploading, setUploading] = useState(false);
   const pending = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const composerInput = useRef<HTMLTextAreaElement>(null);
+  const dragDepth = useRef(0);
   const requestsRef = useRef(requests);
   const decisionsRef = useRef(decisions);
   const activitiesById = new Map(liveActivities.map((activity) => [activity.id, activity]));
@@ -108,6 +114,9 @@ export default function Home() {
     !items.some((item) => item.kind === "tool" && item.state === "running");
   const reviewing = requests.length > 0;
   const decidedCount = requests.filter((request) => decisions[request.tool.callId]).length;
+  const showWelcome = items.length === 0 && !busy && !restoring;
+  const composerDisabled = busy || reviewing || restoring || uploading;
+  const currentTitle = sessions.find((session) => session.id === sessionId)?.title;
 
   useEffect(() => {
     const id = readStoredSessionId(window.location, window.localStorage);
@@ -300,20 +309,43 @@ export default function Home() {
   }
 
   return (
-    <div className="flex h-dvh">
+    <div className="agent-app flex h-dvh overflow-hidden">
       <SessionSidebar
         sessions={sessions}
         currentId={sessionId}
-        disabled={busy}
+        disabled={busy || uploading || restoring}
+        loading={restoring}
         onNew={newSession}
         onSelect={(id) => void openSession(id)}
         onRename={(id, title) => void renameSession(id, title)}
         onDelete={setDeleteTarget}
       />
-      <div className="flex min-w-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1">
-        {items.length === 0 && !busy && !restoring ? (
-          <Welcome />
+      <main className="workspace relative flex min-w-0 flex-1 flex-col">
+      <header className="workspace-header">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="hidden text-muted-foreground md:block"><LanguagesIcon className="size-4" /></span>
+          <span className="truncate text-sm font-medium" title={currentTitle}>{currentTitle ?? "翻译工作台"}</span>
+        </div>
+        <span className="workspace-status" role="status">
+          {busy || restoring || uploading ? <Loader2Icon className="size-3 animate-spin" /> : <span className="status-dot" />}
+          <span>{restoring ? "恢复会话中" : uploading ? "正在上传" : busy ? "正在处理" : reviewing ? "等待你审核" : "逐段翻译 · 由你定稿"}</span>
+        </span>
+      </header>
+      <div className={cn("workspace-body flex min-h-0 flex-1 flex-col", showWelcome && "workspace-body-welcome")}>
+      <div className={cn("min-h-0 flex-1", showWelcome && "welcome-container")}>
+        {showWelcome ? (
+          <Welcome
+            disabled={composerDisabled}
+            onPrompt={(prompt) => {
+              setDraft(prompt);
+              composerInput.current?.focus();
+            }}
+            onUpload={() => fileInput.current?.click()}
+          />
+        ) : restoring ? (
+          <div className="flex h-full items-center justify-center gap-3 text-sm text-muted-foreground" role="status">
+            <Loader2Icon className="size-4 animate-spin" />正在恢复你的工作台…
+          </div>
         ) : (
           <MessageScrollerProvider>
             <MessageScroller className="h-full">
@@ -340,7 +372,7 @@ export default function Home() {
                           <MessageContent>
                             <Bubble
                               align={item.kind === "user" ? "end" : "start"}
-                              variant={item.kind === "user" ? "muted" : "default"}
+                              variant={item.kind === "user" ? "muted" : "ghost"}
                             >
                               <BubbleContent>{item.text}</BubbleContent>
                             </Bubble>
@@ -357,7 +389,7 @@ export default function Home() {
                     >
                       <Message align="start">
                         <MessageContent>
-                          <Bubble align="start" variant="default">
+                          <Bubble align="start" variant="ghost">
                             <BubbleContent>{liveText}</BubbleContent>
                           </Bubble>
                         </MessageContent>
@@ -405,11 +437,17 @@ export default function Home() {
                   ) : null}
                 </MessageScrollerContent>
               </MessageScrollerViewport>
+              <MessageScrollerButton aria-label="回到最新消息" title="回到最新消息" />
             </MessageScroller>
           </MessageScrollerProvider>
         )}
       </div>
-      {error ? <p className="mx-auto w-full max-w-3xl px-4 text-sm text-destructive">{error}</p> : null}
+      {error ? (
+        <div className="mx-auto mb-3 flex w-full max-w-3xl items-start gap-3 px-4" role="alert">
+          <p className="min-w-0 flex-1 rounded-xl bg-destructive/10 px-4 py-3 text-sm wrap-anywhere text-destructive">{error}</p>
+          <Button type="button" variant="ghost" size="icon" aria-label="关闭错误提示" onClick={() => setError(undefined)}><XIcon /></Button>
+        </div>
+      ) : null}
       {reviewing ? (
         <div className="max-h-[50dvh] overflow-y-auto">
           {requests.length > 1 ? (
@@ -429,65 +467,99 @@ export default function Home() {
         </div>
       ) : null}
       <form
-        className={`mx-auto w-full max-w-3xl px-4 pb-4 ${dragging ? "opacity-70" : ""}`}
+        aria-label="翻译消息"
+        className={cn("composer mx-auto w-full max-w-3xl shrink-0 px-4", dragging && "composer-dragging")}
         onSubmit={(event) => {
           event.preventDefault();
-          void send();
+          if (!composerDisabled) void send();
+        }}
+        onDragEnter={(event) => {
+          if (!event.dataTransfer.types.includes("Files")) return;
+          event.preventDefault();
+          dragDepth.current += 1;
+          if (!composerDisabled) setDragging(true);
         }}
         onDragOver={(event) => {
+          if (!event.dataTransfer.types.includes("Files")) return;
           event.preventDefault();
-          setDragging(true);
+          event.dataTransfer.dropEffect = composerDisabled ? "none" : "copy";
         }}
-        onDragLeave={() => setDragging(false)}
+        onDragLeave={(event) => {
+          event.preventDefault();
+          dragDepth.current = Math.max(0, dragDepth.current - 1);
+          if (dragDepth.current === 0) setDragging(false);
+        }}
         onDrop={(event) => {
           event.preventDefault();
+          dragDepth.current = 0;
           setDragging(false);
-          void upload(event.dataTransfer.files);
+          if (!composerDisabled) void upload(event.dataTransfer.files);
         }}
       >
         {files.length > 0 ? (
-          <ul className="mb-2 flex flex-col gap-2">
+          <ul className="composer-files mb-3 flex max-h-36 flex-col gap-2 overflow-y-auto" aria-label="会话文件">
             {files.map((file) => (
               <FileProgress key={file.id} file={file} sessionId={sessionId} busy={busy} />
             ))}
           </ul>
         ) : null}
-        <InputGroup>
+        <div className="relative">
+        <InputGroup className="composer-surface" aria-label="消息输入区">
           <InputGroupTextarea
+            ref={composerInput}
             value={draft}
-            placeholder={inputPlaceholder}
-            rows={1}
-            disabled={busy || reviewing}
+            aria-label="翻译要求"
+            aria-describedby="composer-hint"
+            placeholder={reviewing ? "完成上方审核后，继续对话…" : "输入文字、粘贴网页链接，或告诉我你的翻译要求…"}
+            className="composer-textarea"
+            rows={2}
+            disabled={composerDisabled}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
+              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
                 event.preventDefault();
-                void send();
+                if (!composerDisabled) void send();
               }
             }}
           />
-          <InputGroupAddon align="block-end" className="justify-between">
-            <input
-              ref={fileInput}
-              type="file"
-              multiple
-              className="hidden"
-              onChange={(event) => {
-                void upload(event.target.files);
-                event.target.value = "";
-              }}
-            />
-            <InputGroupButton type="button" size="sm" variant="ghost" onClick={() => fileInput.current?.click()}>
-              <PaperclipIcon />
-              上传
-            </InputGroupButton>
-            <InputGroupButton type="submit" size="sm" disabled={busy || reviewing}>
-              Send
+          <InputGroupAddon align="block-end" className="composer-toolbar justify-between">
+            <div className="flex min-w-0 items-center gap-2">
+              <input
+                ref={fileInput}
+                type="file"
+                multiple
+                aria-label="上传翻译文件"
+                disabled={composerDisabled}
+                className="hidden"
+                onChange={(event) => {
+                  void upload(event.target.files);
+                  event.target.value = "";
+                }}
+              />
+              <InputGroupButton type="button" size="sm" variant="ghost" className="composer-attach" disabled={composerDisabled} title="上传文件，也可拖拽到输入框" onClick={() => fileInput.current?.click()}>
+                {uploading ? <Loader2Icon data-icon="inline-start" className="animate-spin" /> : <PaperclipIcon data-icon="inline-start" />}
+                <span>{uploading ? "上传中…" : "添加文件"}</span>
+              </InputGroupButton>
+              <span className="composer-mode"><LanguagesIcon className="size-3.5" />翻译 Agent</span>
+            </div>
+            <InputGroupButton type="submit" size="icon-sm" variant="default" className="composer-send" aria-label={busy ? "正在处理" : "发送消息"} title="发送消息（Enter）" disabled={composerDisabled || !draft.trim()}>
+              {busy ? <Loader2Icon className="animate-spin" /> : <ArrowUpIcon />}
             </InputGroupButton>
           </InputGroupAddon>
         </InputGroup>
+        {dragging ? (
+          <div className="composer-drop-overlay" aria-hidden="true">
+            <UploadCloudIcon className="size-7" /><span>松开即可上传文件</span><span className="text-xs font-normal text-muted-foreground">添加到当前会话，开始逐段翻译</span>
+          </div>
+        ) : null}
+        </div>
+        <div id="composer-hint" className="composer-hint">
+          <span role="status">{busy ? "Agent 正在处理，请稍候…" : reviewing ? "请先审核上方译文，再继续对话" : uploading ? "正在将文件添加到会话…" : "每一段译文，都由你确认。"}</span>
+          <span className="hidden shrink-0 sm:inline"><kbd>Enter</kbd> 发送<span className="mx-2">·</span><kbd>Shift + Enter</kbd> 换行</span>
+        </div>
       </form>
       </div>
+      </main>
       <AlertDialog
         open={deleteTarget !== undefined}
         onOpenChange={(open) => {
@@ -532,6 +604,7 @@ export default function Home() {
       body.append("file", file);
     }
     setError(undefined);
+    setUploading(true);
     try {
       const response = await fetch(`/sessions/${id}/files`, { method: "POST", body });
       const payload = (await response.json()) as
@@ -545,6 +618,8 @@ export default function Home() {
       void loadSessions();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -634,12 +709,14 @@ function FileProgress({
   const value = file.status === "done" ? 100 : waiting ? null : Math.round(file.progress * 100);
   const label = file.status === "done" ? "已完成" : waiting ? "翻译中" : `${Math.round(file.progress * 100)}%`;
   return (
-    <li className="flex flex-col gap-1.5 text-sm">
-      <div className="flex items-center gap-3">
-        <span className="min-w-0 truncate">{file.name}</span>
-        <span className="ml-auto shrink-0 text-muted-foreground tabular-nums">{label}</span>
-        <a className="shrink-0 text-cyan-700" href={downloadHref(sessionId, file.id)}>
-          下载译文
+    <li className="file-progress flex flex-col gap-2 text-sm">
+      <div className="flex items-center gap-2.5">
+        <FileTextIcon className="size-4 shrink-0 text-primary" />
+        <span className="min-w-0 flex-1 truncate" title={file.name}>{file.name}</span>
+        <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground tabular-nums">{file.status === "done" ? <CheckIcon className="size-3" /> : null}{label}</span>
+        <a className="file-download" href={downloadHref(sessionId, file.id)} aria-label={`下载译文：${file.name}`} title="下载译文">
+          <ArrowDownToLineIcon className="size-4" />
+          <span className="hidden sm:inline">下载译文</span>
         </a>
       </div>
       <Progress
