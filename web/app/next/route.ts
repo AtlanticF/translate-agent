@@ -9,7 +9,7 @@ import { requireUserId } from "../../lib/request-auth";
 import type { SessionStore } from "../../lib/session";
 import { getSessionFileStore, getSessionStore } from "../../lib/session-cloudflare";
 import {
-  ownedAppendTranslated,
+  ownedApplyTranslated,
   ownedReadOriginalText,
   type SessionFileStore,
 } from "../../lib/session-files";
@@ -106,7 +106,7 @@ async function openLoop(
 ) {
   const session = await import("../../lib/agent-session.js");
   const readImported = ownedReadOriginalText(context.sessions, context.files, context.userId);
-  const appendTranslated = ownedAppendTranslated(context.sessions, context.files, context.userId);
+  const applyTranslated = ownedApplyTranslated(context.sessions, context.files, context.userId);
   // 已翻译的源文覆盖区间，供 Translate 识别重复段落（续翻防重复）。
   const coveredSpans: TranslateCovered = async (filePath) => {
     const spans = await context.files.translatedSpans(filePath);
@@ -133,7 +133,7 @@ async function openLoop(
           ? context.skills.fs.readFile(filePath)
           : readImported(filePath),
       write: async ({ file_path, translated_string, source_start, source_end }) => {
-        await appendTranslated(file_path, translated_string, {
+        await applyTranslated(file_path, translated_string, {
           start: source_start,
           end: source_end,
         });

@@ -14,6 +14,12 @@ export const sessions = sqliteTable("sessions", {
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
 });
 
+export type TranslationUnit = {
+  start: number;
+  end: number;
+  translated: string;
+};
+
 export const sessionFiles = sqliteTable("session_files", {
   id: text("id").primaryKey(),
   sessionId: text("session_id").notNull(),
@@ -22,6 +28,7 @@ export const sessionFiles = sqliteTable("session_files", {
   size: integer("size").notNull(),
   status: text("status").$type<"open" | "done">().notNull().default("open"),
   covered: text("covered", { mode: "json" }).$type<[number, number][]>().notNull().default([]),
+  units: text("units", { mode: "json" }).$type<TranslationUnit[]>().notNull().default([]),
   sourceChars: integer("source_chars").notNull().default(0),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 });

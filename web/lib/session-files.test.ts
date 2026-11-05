@@ -6,14 +6,14 @@ import { saveUploadedFiles } from "./save-session-files";
 import { createSessionStore } from "./session-store";
 import {
   createSessionFileStore,
-  ownedAppendTranslated,
+  ownedApplyTranslated,
   ownedReadOriginalText,
   type ObjectBucket,
   translatedDownloadName,
 } from "./session-files";
 import * as schema from "./session-schema";
 
-test("stores an original copy and appends only approved translations", async () => {
+test("stores an original copy and replaces translated spans in place", async () => {
   const { sessions, files, bucket } = openStore();
   const session = await sessions.create("user-a", { id: "session-1" });
 
@@ -28,12 +28,42 @@ test("stores an original copy and appends only approved translations", async () 
   expect(await files.readOriginalText(saved.path)).toBe("hello world");
   expect(await files.readTranslated(session.id, saved.id)).toBe("");
 
-  await files.appendTranslated(saved.path, "你好");
-  await files.appendTranslated(saved.path, "世界");
+  await files.applyTranslated(saved.path, "你好", { start: 0, end: 5 });
+  await files.applyTranslated(saved.path, "世界", { start: 6, end: 11 });
 
   expect(await files.readOriginalText(saved.path)).toBe("hello world");
-  expect(await files.readTranslated(session.id, saved.id)).toBe("你好\n\n世界");
+  expect(await files.readTranslated(session.id, saved.id)).toBe("你好 世界");
   expect(bucket.objects.has(`sessions/${session.id}/${saved.id}/original`)).toBe(true);
+});
+
+test("keeps sentence-level units on the same paragraph line", async () => {
+  const { files } = openStore();
+  const saved = await files.add("session-1", {
+    name: "a.md",
+    mediaType: "text/markdown",
+    bytes: new TextEncoder().encode("One two. Three four."),
+  });
+
+  await files.applyTranslated(saved.path, "一 二。", { start: 0, end: 8 });
+  await files.applyTranslated(saved.path, "三 四。", { start: 8, end: 20 });
+
+  expect(await files.readTranslated("session-1", saved.id)).toBe("一 二。三 四。");
+});
+
+test("replaces an overlapping earlier unit when re-translated", async () => {
+  const { files } = openStore();
+  const saved = await files.add("session-1", {
+    name: "a.md",
+    mediaType: "text/markdown",
+    bytes: new TextEncoder().encode("hello world"),
+  });
+
+  await files.applyTranslated(saved.path, "你好", { start: 0, end: 5 });
+  await files.applyTranslated(saved.path, "你好世界", { start: 0, end: 11 });
+
+  expect(await files.readTranslated("session-1", saved.id)).toBe("你好世界");
+  const file = (await files.list("session-1"))[0];
+  expect(file).toMatchObject({ status: "done", progress: 1 });
 });
 
 test("marks a file done when approved spans cover the source", async () => {
@@ -48,12 +78,12 @@ test("marks a file done when approved spans cover the source", async () => {
   expect(saved.status).toBe("open");
   expect(saved.progress).toBe(0);
 
-  await files.appendTranslated(saved.path, "你好", { start: 0, end: 5 });
+  await files.applyTranslated(saved.path, "你好", { start: 0, end: 5 });
   const partial = (await files.list("session-1"))[0];
   expect(partial?.status).toBe("open");
   expect(partial?.progress).toBeCloseTo(5 / source.length);
 
-  await files.appendTranslated(saved.path, "世界", { start: 7, end: source.length });
+  await files.applyTranslated(saved.path, "世界", { start: 7, end: source.length });
   const done = (await files.list("session-1"))[0];
   expect(done?.status).toBe("done");
   expect(done?.progress).toBe(1);
@@ -69,9 +99,10 @@ test("keeps a file open when a paragraph is still untranslated", async () => {
     bytes: new TextEncoder().encode("hello\n\nworld"),
   });
 
-  await files.appendTranslated(saved.path, "世界", { start: 7, end: 12 });
+  await files.applyTranslated(saved.path, "世界", { start: 7, end: 12 });
 
   expect((await files.list("session-1"))[0]).toMatchObject({ status: "open" });
+  expect(await files.readTranslated("session-1", saved.id)).toBe("hello\n\n世界");
 });
 
 test("lists files for one session and removes them with the session", async () => {
@@ -139,10 +170,12 @@ test("owned file access rejects another user's session", async () => {
     bytes: new TextEncoder().encode("hello"),
   });
   const read = ownedReadOriginalText(sessions, files, "user-a");
-  const append = ownedAppendTranslated(sessions, files, "user-a");
+  const apply = ownedApplyTranslated(sessions, files, "user-a");
 
   await expect(read(saved.path)).rejects.toThrow(`File not found: ${saved.path}`);
-  await expect(append(saved.path, "你好")).rejects.toThrow(`File not found: ${saved.path}`);
+  await expect(apply(saved.path, "你好", { start: 0, end: 5 })).rejects.toThrow(
+    `File not found: ${saved.path}`,
+  );
   expect(await files.readTranslated("session-b", saved.id)).toBe("");
 });
 
@@ -155,10 +188,10 @@ test("owned file access works for the session owner", async () => {
     bytes: new TextEncoder().encode("hello"),
   });
   const read = ownedReadOriginalText(sessions, files, "user-a");
-  const append = ownedAppendTranslated(sessions, files, "user-a");
+  const apply = ownedApplyTranslated(sessions, files, "user-a");
 
   expect(await read(saved.path)).toBe("hello");
-  await append(saved.path, "你好");
+  await apply(saved.path, "你好", { start: 0, end: 5 });
   expect(await files.readTranslated("session-a", saved.id)).toBe("你好");
 });
 
@@ -173,6 +206,7 @@ function openStore() {
   sqlite.exec(readFileSync(new URL("../drizzle/0002_session_file_progress.sql", import.meta.url), "utf8"));
   sqlite.exec(readFileSync(new URL("../drizzle/0003_session_ownership.sql", import.meta.url), "utf8"));
   sqlite.exec(readFileSync(new URL("../drizzle/0004_session_title.sql", import.meta.url), "utf8"));
+  sqlite.exec(readFileSync(new URL("../drizzle/0005_session_file_units.sql", import.meta.url), "utf8"));
   const db = drizzle(sqlite, { schema });
   const bucket = memoryBucket();
   return {
@@ -216,7 +250,7 @@ function memoryBucket(): ObjectBucket & { objects: Map<string, Uint8Array> } {
   };
 }
 
-test("appendTranslated is idempotent for an already covered span", async () => {
+test("applyTranslated is idempotent for an already covered span", async () => {
   const { files } = openStore();
   const saved = await files.add("session-1", {
     name: "a.txt",
@@ -224,11 +258,11 @@ test("appendTranslated is idempotent for an already covered span", async () => {
     bytes: new TextEncoder().encode("hello world"),
   });
 
-  await files.appendTranslated(saved.path, "你好", { start: 0, end: 5 });
-  // 同一区间重复审核通过（中断重放）不再追加第二份译文。
-  await files.appendTranslated(saved.path, "你好", { start: 0, end: 5 });
+  await files.applyTranslated(saved.path, "你好", { start: 0, end: 5 });
+  // 同一区间重复审核通过（中断重放）不再写入第二份译文。
+  await files.applyTranslated(saved.path, "你好", { start: 0, end: 5 });
 
-  expect(await files.readTranslated("session-1", saved.id)).toBe("你好");
+  expect(await files.readTranslated("session-1", saved.id)).toBe("你好 world");
   expect(await files.translatedSpans(saved.path)).toEqual([[0, 5]]);
 });
 
@@ -250,7 +284,7 @@ test("resumeInfo points at the first untranslated text", async () => {
 
   expect(await files.resumeInfo(saved.path)).toBeUndefined();
 
-  await files.appendTranslated(saved.path, "第一段", { start: 0, end: "para one".length });
+  await files.applyTranslated(saved.path, "第一段", { start: 0, end: "para one".length });
 
   const info = await files.resumeInfo(saved.path);
   expect(info?.line).toBe(3);
@@ -266,8 +300,8 @@ test("resumeInfo is undefined when everything is translated", async () => {
     bytes: new TextEncoder().encode(source),
   });
 
-  await files.appendTranslated(saved.path, "一", { start: 0, end: 3 });
-  await files.appendTranslated(saved.path, "二", { start: 4, end: 7 });
+  await files.applyTranslated(saved.path, "一", { start: 0, end: 3 });
+  await files.applyTranslated(saved.path, "二", { start: 4, end: 7 });
 
   expect(await files.resumeInfo(saved.path)).toBeUndefined();
 });

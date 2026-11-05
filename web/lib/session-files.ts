@@ -1,7 +1,7 @@
 import { and, asc, eq } from "drizzle-orm";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import type { SessionStore } from "./session";
-import { sessionFiles } from "./session-schema";
+import { sessionFiles, type TranslationUnit } from "./session-schema";
 
 const maxFileBytes = 10 * 1024 * 1024;
 
@@ -54,7 +54,7 @@ export type SessionFileStore = {
   list(sessionId: string): Promise<SessionFile[]>;
   get(sessionId: string, fileId: string): Promise<SessionFile | undefined>;
   readOriginalText(filePath: string): Promise<string>;
-  appendTranslated(filePath: string, translated: string, source?: SourceSpan): Promise<void>;
+  applyTranslated(filePath: string, translated: string, source: SourceSpan): Promise<void>;
   readTranslated(sessionId: string, fileId: string): Promise<string>;
   // 已审核通过并落库的源文覆盖区间，用于识别重复翻译和续翻位置。
   translatedSpans(filePath: string): Promise<[number, number][] | undefined>;
@@ -89,6 +89,7 @@ export function createSessionFileStore(
         size: file.bytes.byteLength,
         status,
         covered: [],
+        units: [],
         sourceChars: text.length,
         createdAt,
       });
@@ -137,7 +138,7 @@ export function createSessionFileStore(
       return body.text();
     },
 
-    async appendTranslated(filePath, translated, source) {
+    async applyTranslated(filePath, translated, source) {
       const parsed = parseImportedFilePath(filePath);
       if (!parsed) {
         throw new Error(`File not found: ${filePath}`);
@@ -150,24 +151,24 @@ export function createSessionFileStore(
       if (!row) {
         throw new Error(`File not found: ${filePath}`);
       }
-      // 幂等保护：源文区间已全部覆盖说明这段早已翻译过，重复追加会产生重复译文。
-      if (source && isSpanCovered(row.covered ?? [], source.start, source.end)) {
+      // 幂等保护：源文区间已全部覆盖说明这段早已翻译过，跳过写入避免重复审核。
+      if (isSpanCovered(row.covered ?? [], source.start, source.end)) {
         return;
       }
-      const key = translatedKey(parsed.sessionId, parsed.fileId);
-      const current = await bucket.get(key);
-      const text = current ? await current.text() : "";
-      await bucket.put(key, text.length === 0 ? translated : `${text}\n\n${translated}`);
-      if (!source || source.end <= source.start) {
-        return;
-      }
-      const covered = mergeRanges([...(row.covered ?? []), [source.start, source.end]]);
+      // 译文按原始偏移就地替换，未翻译部分（段落间空行、列表符号等）原样保留。
+      const unit: TranslationUnit = { start: source.start, end: source.end, translated };
+      const units = [...(row.units ?? []).filter((item) => !intersects(item, unit)), unit].sort(
+        (left, right) => left.start - right.start,
+      );
       const original = await bucket.get(originalKey(parsed.sessionId, parsed.fileId));
       const sourceText = original ? await original.text() : "";
+      await bucket.put(translatedKey(parsed.sessionId, parsed.fileId), buildTranslated(sourceText, units));
+      const covered = mergeRanges(units.map((item) => [item.start, item.end] as [number, number]));
       const done = row.status === "done" || translationCovers(sourceText, covered);
       await db
         .update(sessionFiles)
         .set({
+          units,
           covered,
           sourceChars: sourceText.length,
           status: done ? "done" : "open",
@@ -254,14 +255,14 @@ export function ownedReadOriginalText(
   };
 }
 
-export function ownedAppendTranslated(
+export function ownedApplyTranslated(
   sessions: SessionStore,
   files: SessionFileStore,
   userId: string,
-): (filePath: string, translated: string, source?: SourceSpan) => Promise<void> {
+): (filePath: string, translated: string, source: SourceSpan) => Promise<void> {
   return async (filePath, translated, source) => {
     await requireOwnedSession(sessions, userId, filePath);
-    await files.appendTranslated(filePath, translated, source);
+    await files.applyTranslated(filePath, translated, source);
   };
 }
 
@@ -304,6 +305,20 @@ function translatedKey(sessionId: string, fileId: string): string {
   return `sessions/${sessionId}/${fileId}/translated`;
 }
 
+function intersects(unit: TranslationUnit, span: SourceSpan): boolean {
+  return unit.start < span.end && span.start < unit.end;
+}
+
+function buildTranslated(source: string, units: readonly TranslationUnit[]): string {
+  let built = "";
+  let cursor = 0;
+  for (const unit of units) {
+    built += source.slice(cursor, unit.start) + unit.translated;
+    cursor = unit.end;
+  }
+  return built + source.slice(cursor);
+}
+
 // [start, end) 是否已被某个覆盖区间完整包含。
 function isSpanCovered(ranges: readonly (readonly [number, number])[], start: number, end: number): boolean {
   if (end <= start) {
@@ -342,7 +357,8 @@ function firstLine(text: string): string {
   return line.trim().slice(0, 80);
 }
 
-export function mergeRanges(ranges: readonly (readonly [number, number])[]): [number, number][] {  const sorted = ranges
+export function mergeRanges(ranges: readonly (readonly [number, number])[]): [number, number][] {
+  const sorted = ranges
     .filter(([start, end]) => end > start)
     .map(([start, end]): [number, number] => [start, end])
     .sort((left, right) => left[0] - right[0] || left[1] - right[1]);
