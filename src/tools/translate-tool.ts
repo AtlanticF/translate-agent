@@ -43,6 +43,7 @@ const description = `Create translation units for documents to be translated. Ac
 - 'translate_string' is the draft translation of 'src_string' but should be as accurate as possible to reduce later manual proofreading.
 - The returned 'translated_string' is the final translation after human review. 'status' indicates the human review state and can be 'approve', 'reject', or 'refined' (user manually adjusted).
 - If 'reject' is due to 'src_string' not existing in the original text, verify the selected unit and ensure spacing and line breaks match.
+- Straight and curly quotes in 'src_string' match the same character in the file.
 - If 'reject' is due to 'src_string' being non-unique, gradually increase its scope until you find a unique match.
 `;
 
@@ -185,6 +186,15 @@ function findUnique(text: string, src: string): { start: number } | { reason: st
     return { reason: "src_string is empty" };
   }
 
+  // 模型常把弯引号写成直引号。两边都折成直引号再找，长度不变，下标仍对得上原文。
+  const exact = locate(text, src);
+  if (!("reason" in exact) || exact.reason !== "src_string was not found in the file") {
+    return exact;
+  }
+  return locate(foldQuotes(text), foldQuotes(src));
+}
+
+function locate(text: string, src: string): { start: number } | { reason: string } {
   const start = text.indexOf(src);
   if (start < 0) {
     return { reason: "src_string was not found in the file" };
@@ -193,6 +203,10 @@ function findUnique(text: string, src: string): { start: number } | { reason: st
     return { reason: "src_string is not unique in the file" };
   }
   return { start };
+}
+
+function foldQuotes(text: string): string {
+  return text.replace(/[\u201C\u201D\u201E\u00AB\u00BB]/g, '"').replace(/[\u2018\u2019\u201A]/g, "'");
 }
 
 function replaceAt(text: string, start: number, length: number, translated: string): string {

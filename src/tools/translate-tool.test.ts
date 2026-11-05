@@ -188,6 +188,33 @@ test("replaces only the unique source string", async () => {
   });
 });
 
+test("matches curly quotes when the source string uses straight quotes", async () => {
+  const source =
+    'I define maintainability here as making it easy and low risk to change the codebase over time - [also known as “internal quality”](https://martinfowler.com/articles/is-quality-worth-cost.html).';
+  const src = source.replaceAll("“", '"').replaceAll("”", '"');
+  const { run, writer } = executor(vi.fn(async () => {}), async () => `before ${source} after`);
+
+  await expect(run({ ...input, src_string: src }, options)).resolves.toEqual({
+    type: "copilot-request",
+    payload: {
+      tool: { name: "Translate", callId: "call-1" },
+      file_path: filePath,
+      src_string: src,
+      translate_string: "你好",
+    },
+  });
+
+  await run({ ...input, src_string: src }, options, { status: "approve" });
+
+  expect(writer).toHaveBeenCalledWith({
+    contents: "before 你好 after",
+    file_path: filePath,
+    translated_string: "你好",
+    source_start: "before ".length,
+    source_end: "before ".length + src.length,
+  });
+});
+
 test("rejects a source string that is missing or not unique", async () => {
   const missing = executor(vi.fn(async () => {}), async () => "goodbye");
   const repeated = executor(vi.fn(async () => {}), async () => "hello hello");

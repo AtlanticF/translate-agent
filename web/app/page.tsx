@@ -47,6 +47,8 @@ import {
 import { inputPlaceholder, submittedUserText } from "../../shared/welcome";
 import type { CopilotReviewResponse } from "../lib/copilot-batch";
 import { noteCopilotDecision } from "../lib/copilot-batch";
+import { pendingCopilotRequests } from "../lib/pending-copilot";
+import { readStoredSessionId, writeStoredSessionId } from "../lib/stored-session";
 import type {
   ClientFile,
   ClientLiveEvent,
@@ -78,6 +80,7 @@ export default function Home() {
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState<string | undefined>();
   const [reveal, setReveal] = useState<"restore" | "live">("live");
+  const [restoring, setRestoring] = useState(true);
   const pending = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const requestsRef = useRef(requests);
@@ -107,8 +110,21 @@ export default function Home() {
   const decidedCount = requests.filter((request) => decisions[request.tool.callId]).length;
 
   useEffect(() => {
+    const id = readStoredSessionId(window.location, window.localStorage);
     void loadSessions();
+    if (!id) {
+      setRestoring(false);
+      return;
+    }
+    void openSession(id).finally(() => setRestoring(false));
   }, []);
+
+  useEffect(() => {
+    if (restoring || !sessionId) {
+      return;
+    }
+    rememberSession(sessionId);
+  }, [sessionId, restoring]);
 
   useEffect(() => {
     if (reveal !== "restore") {
@@ -148,6 +164,7 @@ export default function Home() {
     setLiveReasoning("");
     setLiveActivities([]);
     setError(undefined);
+    rememberSession(undefined);
   }
 
   async function renameSession(id: string, title: string) {
@@ -215,15 +232,19 @@ export default function Home() {
         | { id: string; messages: ModelMessage[]; files?: ImportedFile[] }
         | { error: string };
       if (!response.ok || !("messages" in payload)) {
+        if (response.status === 404 && !sessionId) {
+          rememberSession(undefined);
+        }
         throw new Error("error" in payload ? payload.error : "request failed");
       }
       setReveal("restore");
       setSessionId(payload.id);
       setMessages(payload.messages);
       setFiles(payload.files ?? []);
-      requestsRef.current = [];
+      const nextRequests = pendingCopilotRequests(payload.messages);
+      requestsRef.current = nextRequests;
       decisionsRef.current = {};
-      setRequests([]);
+      setRequests(nextRequests);
       setDecisions({});
       setDraft("");
       setLiveText("");
@@ -291,7 +312,7 @@ export default function Home() {
       />
       <div className="flex min-w-0 flex-1 flex-col">
       <div className="min-h-0 flex-1">
-        {items.length === 0 && !busy ? (
+        {items.length === 0 && !busy && !restoring ? (
           <Welcome />
         ) : (
           <MessageScrollerProvider>
@@ -644,6 +665,14 @@ function enterStyle(index: number, reveal: "restore" | "live"): CSSProperties | 
   }
   const delay = `${Math.min(index, 12) * 40}ms`;
   return { animationDelay: delay, "--tw-animation-delay": delay } as CSSProperties;
+}
+
+function rememberSession(id: string | undefined) {
+  const next = writeStoredSessionId(id, window.location, window.localStorage);
+  const current = window.location.pathname + window.location.search + window.location.hash;
+  if (next !== current) {
+    window.history.replaceState(null, "", next);
+  }
 }
 
 function downloadHref(sessionId: string | undefined, fileId: string): string {
