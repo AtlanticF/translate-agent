@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "d3bc62b3-65c9-4dc0-80b4-061cace95fab",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/Users/matt/AI/translate-agent/.archify/architecture-runtime-20261105-225805/candidate.json",
+  "output": "/Users/matt/AI/translate-agent/.archify/architecture-runtime-20261105-225805/runtime-architecture.html",
+  "specification": {
+    "sha256": "0e6ef8d9dde95dc6568b982e08e6c71a771143ebd801a30c45178297301cfb2d",
+    "bytes": 10745
+  },
+  "artifact": {
+    "sha256": "29012f03d40f10d6c01cdcc3657812c16ec45c30b6a4abf19e7c9511f83847ce",
+    "bytes": 857340
+  }
+}

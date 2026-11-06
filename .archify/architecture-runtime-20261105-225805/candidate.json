@@ -1,0 +1,238 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Translate Agent — Web Runtime",
+    "locale": "en",
+    "output": ".archify/architecture-runtime-20261105-225805/runtime-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/AtlanticF/translate-agent.git",
+      "revision": "cc8bad1af0e2829e6323b5428858bc47b9f28a49",
+      "link_mode": "local-only"
+    }
+  },
+  "components": [
+    {
+      "id": "reviewer",
+      "type": "external",
+      "icon": "person",
+      "label": "Reviewer",
+      "sublabel": "Approve / refine / reject",
+      "pos": [40, 300],
+      "size": [150, 80],
+      "sources": [{ "path": "web/app/page.tsx", "line": 284, "end_line": 305 }]
+    },
+    {
+      "id": "browser",
+      "type": "frontend",
+      "label": "React Browser",
+      "sublabel": "Drives turns; pauses for review",
+      "pos": [280, 300],
+      "size": [180, 80],
+      "sources": [
+        { "path": "web/lib/client-loop.ts", "line": 35, "end_line": 118 },
+        { "path": "web/app/page.tsx", "line": 596, "end_line": 673 }
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "Next.js API",
+      "sublabel": "Auth + one agent step",
+      "tag": "Session owner checked",
+      "pos": [610, 300],
+      "size": [185, 80],
+      "sources": [
+        { "path": "web/app/next/route.ts", "line": 24, "end_line": 89 },
+        { "path": "web/lib/next-turn.ts", "line": 54, "end_line": 139 },
+        { "path": "web/lib/session-store.ts", "line": 68, "end_line": 101 }
+      ]
+    },
+    {
+      "id": "agent",
+      "type": "backend",
+      "label": "Agent Core + Tools",
+      "sublabel": "Shared code; in-process IO",
+      "tag": "Translate writes after review",
+      "pos": [935, 300],
+      "size": [200, 80],
+      "sources": [
+        { "path": "src/agent/agent-loop.ts", "line": 163, "end_line": 179 },
+        { "path": "src/tools/translate-tool.ts", "line": 129, "end_line": 163 },
+        { "path": "web/app/next/route.ts", "line": 97, "end_line": 157 }
+      ]
+    },
+    {
+      "id": "models",
+      "type": "external",
+      "label": "OpenRouter",
+      "sublabel": "External model API",
+      "pos": [1275, 300],
+      "size": [175, 80],
+      "sources": [
+        { "path": "src/ai/llm.ts", "line": 16, "end_line": 44 },
+        { "path": "src/agent/agent-loop.ts", "line": 163, "end_line": 179 }
+      ]
+    },
+    {
+      "id": "access",
+      "type": "security",
+      "label": "Access Identity",
+      "sublabel": "Runtime identity / JWT keys",
+      "tag": "Integration configured",
+      "pos": [610, 90],
+      "size": [185, 80],
+      "sources": [
+        { "path": "web/lib/request-auth.ts", "line": 6, "end_line": 43 },
+        { "path": "web/lib/access-jwt.ts", "line": 5, "end_line": 37 },
+        { "path": "web/lib/auth.ts", "line": 13, "end_line": 49 }
+      ]
+    },
+    {
+      "id": "articles",
+      "type": "external",
+      "label": "Article Websites",
+      "sublabel": "URL input; HTTP(S) fetch",
+      "tag": "Untrusted HTML",
+      "pos": [935, 90],
+      "size": [200, 80],
+      "sources": [
+        { "path": "src/tools/web-fetch.ts", "line": 40, "end_line": 73 },
+        { "path": "src/prompts/system.workflow.ts", "line": 13, "end_line": 18 }
+      ]
+    },
+    {
+      "id": "sessions",
+      "type": "database",
+      "label": "Cloudflare D1",
+      "sublabel": "Sessions + translation state",
+      "pos": [610, 540],
+      "size": [185, 80],
+      "sources": [
+        { "path": "web/lib/session-schema.ts", "line": 5, "end_line": 34 },
+        { "path": "web/lib/session-cloudflare.ts", "line": 48, "end_line": 54 },
+        { "path": "web/lib/session-files.ts", "line": 141, "end_line": 176 }
+      ]
+    },
+    {
+      "id": "files",
+      "type": "database",
+      "label": "Workers KV · FILES",
+      "sublabel": "Original + assembled translation",
+      "pos": [935, 540],
+      "size": [200, 80],
+      "sources": [
+        { "path": "web/lib/session-cloudflare.ts", "line": 27, "end_line": 54 },
+        { "path": "web/lib/session-files.ts", "line": 74, "end_line": 108 },
+        { "path": "web/lib/session-files.ts", "line": 141, "end_line": 176 }
+      ]
+    },
+    {
+      "id": "tracing",
+      "type": "external",
+      "label": "Langfuse",
+      "sublabel": "Session / model / tool traces",
+      "tag": "Optional; if configured",
+      "pos": [280, 90],
+      "size": [180, 80],
+      "sources": [
+        { "path": "src/observability/langfuse.ts", "line": 25, "end_line": 50 },
+        { "path": "src/observability/langfuse.ts", "line": 63, "end_line": 119 }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "User-controlled client",
+      "wraps": ["reviewer", "browser"],
+      "pad": 24
+    },
+    {
+      "kind": "security-group",
+      "label": "Server trust boundary · one configured Worker",
+      "wraps": ["api", "agent"],
+      "pad": 24
+    },
+    {
+      "kind": "region",
+      "label": "Application data · D1 / KV bindings",
+      "wraps": ["sessions", "files"],
+      "pad": 24
+    },
+    {
+      "kind": "security-group",
+      "label": "Third-party model",
+      "wraps": ["models"],
+      "pad": 24
+    }
+  ],
+  "connections": [
+    { "id": "review-input", "from": "reviewer", "to": "browser", "label": "Review", "variant": "emphasis" },
+    { "id": "browser-turn", "from": "browser", "to": "api", "label": "POST /next + SSE", "variant": "emphasis" },
+    { "id": "run-step", "from": "api", "to": "agent", "label": "one next()", "variant": "emphasis" },
+    { "id": "model-call", "from": "agent", "to": "models", "label": "HTTPS", "variant": "emphasis" },
+    { "id": "verify-identity", "from": "api", "to": "access", "label": "Identity / JWT", "variant": "security" },
+    { "id": "session-state", "from": "api", "to": "sessions", "label": "Session state" },
+    { "id": "translation-write", "from": "agent", "to": "files", "label": "After review" },
+    { "id": "fetch-article", "from": "agent", "to": "articles", "label": "Fetch HTML" },
+    { "id": "optional-tracing", "from": "api", "to": "tracing", "label": "If configured", "variant": "dashed" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Primary path · human-reviewed translation",
+      "items": [
+        "The browser posts one turn and consumes SSE. It repeats only while the agent can continue; a review request or user turn pauses the loop.",
+        "Each request restores stored messages and executes one AgentLoop.next(): a model step OR pending tools, not necessarily both. The model proposes translation units; approve/refine permits the Translate writer, while reject does not.",
+        "Read, fetch, persistence and return traffic are summarized rather than expanded into parallel paths. See web/lib/client-loop.ts:35–118, web/lib/next-turn.ts:54–139 and src/tools/translate-tool.ts:129–163."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Trust boundary · authenticated session ownership",
+      "items": [
+        "The server resolves identity before handling a turn. Runtime Access identity or a verified issuer/audience JWT supplies userId; unresolved identity returns 401. A development identity fallback exists only outside production.",
+        "Session reads and updates constrain both userId and sessionId. File read/write wrappers check session ownership; KV itself is not the per-user authorization layer.",
+        "These frames describe application trust and ownership, not VPCs or deployed security groups. No Access proxy placement or live Access policy is asserted. Evidence: web/lib/auth.ts:13–49; web/lib/session-store.ts:68–101; web/lib/session-files.ts:247–277."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Persistence · separate state and file bodies",
+      "items": [
+        "D1 stores messages, reviewer decisions, file metadata, coverage ranges and translation units, including each unit's translated text. KV stores original bodies, assembled translations and article intermediates.",
+        "Injected server-side tool IO reads originals and writes approved/refined units. Assembly uses original source offsets, preserves original files and tracks open/done status; covered spans prevent duplicate writes.",
+        "The two store arrows summarize their dominant roles, not every read/write. Evidence: web/lib/session-cloudflare.ts:27–54; web/lib/session-files.ts:141–176; web/app/next/route.ts:107–156."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "External dependencies · data crosses the boundary",
+      "items": [
+        "OpenRouter receives model context, including selected source text returned by Read. Tool file-path indirection does not mean document content stays entirely on the server. Review feedback may also be sent for preference extraction.",
+        "Article HTML is externally supplied input. Fetching, article extraction and Markdown conversion are local tools whose sequence is prompt-directed, not a fixed pipeline.",
+        "Langfuse is conditional on configuration and can export tool inputs/outputs and session identifiers, not just timing. Evidence: src/agent/agent-loop.ts:163–178; src/tools/read-tool.ts:90–115; src/observability/langfuse.ts:25–50,63–119."
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Runtime placement · one Worker, shared code",
+      "items": [
+        "Next.js is packaged with OpenNext for a single Cloudflare Worker. API/orchestration and Agent Core are internal responsibilities within that process; there is no separate agent service or queue in this view.",
+        "Web bundling takes src/application/session.ts into the Web application. Skills, Context, Memory and seven tool executors are in-process modules rather than separately deployed agents.",
+        "Evidence: web/wrangler.jsonc:3–22,36–48; web/scripts/bundle-agent.mjs:7–14; src/application/session.ts:70–105."
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Scope and unknowns · code-backed, not live telemetry",
+      "items": [
+        "Pinned to cc8bad1. This is configured Web runtime topology; live deployment, regions, replica counts, Access routing/policies and enabled tracing were not inspected.",
+        "The alternative CLI runs the same core with local file IO and is deliberately kept out of the primary Web path. Its writer modifies the target file, unlike Web's separate original/translation storage.",
+        "Web also constructs filesystem-backed Memory, but durable per-user cloud preference storage is not established. Evidence: src/application/session.ts:28–54,70–116; src/memory/memory.ts:30–41,73–75."
+      ]
+    }
+  ]
+}

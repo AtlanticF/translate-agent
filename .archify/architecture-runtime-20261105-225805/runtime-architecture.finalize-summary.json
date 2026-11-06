@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "architecture",
+  "quality": "showcase",
+  "specification": {
+    "path": "/Users/matt/AI/translate-agent/.archify/architecture-runtime-20261105-225805/candidate.json",
+    "sha256": "0e6ef8d9dde95dc6568b982e08e6c71a771143ebd801a30c45178297301cfb2d",
+    "bytes": 10745
+  },
+  "artifact": {
+    "path": "/Users/matt/AI/translate-agent/.archify/architecture-runtime-20261105-225805/runtime-architecture.html",
+    "sha256": "29012f03d40f10d6c01cdcc3657812c16ec45c30b6a4abf19e7c9511f83847ce",
+    "bytes": 857340
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "/Users/matt/AI/translate-agent/.archify/architecture-runtime-20261105-225805/runtime-architecture.finalize.json",
+    "summaryReceipt": "/Users/matt/AI/translate-agent/.archify/architecture-runtime-20261105-225805/runtime-architecture.finalize-summary.json",
+    "browserCheckReceipt": "/Users/matt/AI/translate-agent/.archify/architecture-runtime-20261105-225805/runtime-architecture.browser-check.json"
+  },
+  "update": {
+    "status": "current",
+    "installedVersion": "3.2.0",
+    "availableVersion": "3.2.0",
+    "releaseNotes": null,
+    "checkedAt": "2026-11-05T14:59:57.372Z",
+    "source": "network",
+    "noticeRequired": false,
+    "noticeText": null
+  },
+  "visualReview": "not-requested",
+  "durationMs": 3049,
+  "browserCheck": {
+    "requested": true,
+    "ran": true
+  }
+}
