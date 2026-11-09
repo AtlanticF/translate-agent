@@ -27,15 +27,35 @@ export type MemorySource = {
   }): Promise<void>;
 };
 
+// CLI 用文件存储；Web 按用户注入自己的存储。
+export type MemoryStorage = {
+  load(): Promise<MemoryItem[]>;
+  save(items: MemoryItem[]): Promise<void>;
+};
+
+export function fileMemoryStorage(filePath = defaultFilePath): MemoryStorage {
+  return {
+    async load() {
+      const parsed: unknown = JSON.parse(await readFile(filePath, "utf8"));
+      return isMemoryList(parsed) ? parsed : [];
+    },
+    async save(items) {
+      await writeFile(filePath, JSON.stringify(items, null, 2));
+    },
+  };
+}
+
 export class Memory implements MemorySource {
   current: MemoryItem[] = [];
+  private readonly storage: MemoryStorage;
 
-  constructor(private readonly filePath = defaultFilePath) {}
+  constructor(storage: string | MemoryStorage = defaultFilePath) {
+    this.storage = typeof storage === "string" ? fileMemoryStorage(storage) : storage;
+  }
 
   async init(): Promise<void> {
     try {
-      const parsed: unknown = JSON.parse(await readFile(this.filePath, "utf8"));
-      this.current = isMemoryList(parsed) ? reindex(parsed) : [];
+      this.current = reindex(await this.storage.load());
     } catch {
       this.current = [];
     }
@@ -71,7 +91,7 @@ export class Memory implements MemorySource {
   }
 
   async save(): Promise<void> {
-    await writeFile(this.filePath, JSON.stringify(this.current, null, 2));
+    await this.storage.save(this.current);
   }
 
   provideMemory(): string {
@@ -102,10 +122,8 @@ export class Memory implements MemorySource {
         },
         telemetry: { functionId: "memory" },
       });
-      await appendFile("/tmp/translator-agent.log", `[memory] Current memory: ${JSON.stringify(this.current)}\n`);
-      // write log into file: /tmp/translator-agent.log
-      await appendFile("/tmp/translator-agent.log", `[memory] LLM response: ${result.text}\n`);
-      // console.info("[memory] LLM response:", result.text);
+      await debugLog(`[memory] Current memory: ${JSON.stringify(this.current)}\n`);
+      await debugLog(`[memory] LLM response: ${result.text}\n`);
       this.applyOps(parseMemoryOps(result.text));
       await this.save();
     } catch (error) {
@@ -113,6 +131,13 @@ export class Memory implements MemorySource {
       console.error(`Failed to parse memory: ${message}`);
     }
   }
+}
+
+// 调试日志写不进去（如 Workers 无文件系统）不能影响记忆保存。
+async function debugLog(line: string): Promise<void> {
+  try {
+    await appendFile("/tmp/translator-agent.log", line);
+  } catch {}
 }
 
 function parseMemoryOps(text: string): MemoryOp[] {

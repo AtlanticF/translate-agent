@@ -7,7 +7,7 @@ import type { WebFileIO } from "../../../src/tools/web-io";
 import { postNext, type NextTurnEventHandler, type NextTurnRequest } from "../../lib/next-turn";
 import { requireUserId } from "../../lib/request-auth";
 import type { SessionStore } from "../../lib/session";
-import { getSessionFileStore, getSessionStore } from "../../lib/session-cloudflare";
+import { getSessionFileStore, getSessionStore, getUserMemoryStore } from "../../lib/session-cloudflare";
 import {
   ownedApplyTranslated,
   ownedReadOriginalText,
@@ -153,6 +153,9 @@ async function openLoop(
           : readLocalDir(dirPath),
       webFiles,
     },
-    { skillsPrompt: context.skills.prompt },
+    {
+      skillsPrompt: context.skills.prompt,
+      memory: await getUserMemoryStore(context.userId),
+    },
   );
 }
