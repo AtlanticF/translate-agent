@@ -2,7 +2,7 @@ import { writeFile } from "node:fs/promises";
 import type { ModelMessage } from "ai";
 import { AgentLoop } from "../agent/agent-loop.js";
 import { Context } from "../messages/context.js";
-import { Memory } from "../memory/memory.js";
+import { Memory, fileMemoryStorage, type MemoryItem, type MemoryStorage } from "../memory/memory.js";
 import type { SkillDirEntry } from "../skills/fs.js";
 import {
   convertHtmlToMarkdownTool,
@@ -54,6 +54,15 @@ export async function createSession(
   return { loop, context, memory };
 }
 
+// 旧版 Web 和 CLI 共用 memory.json；Web 迁到按用户的数据库时，用它做一次静默初始化。
+export async function readLegacyMemory(): Promise<MemoryItem[]> {
+  try {
+    return await fileMemoryStorage().load();
+  } catch {
+    return [];
+  }
+}
+
 export type LoopIO = {
   read?: TranslateReader;
   write?: TranslateWriter;
@@ -65,6 +74,7 @@ export type LoopIO = {
 
 export type LoopOptions = {
   skillsPrompt?: string;
+  memory?: MemoryStorage;
 };
 
 export async function createLoop(
@@ -72,7 +82,7 @@ export async function createLoop(
   io: LoopIO = {},
   options: LoopOptions = {},
 ): Promise<AgentLoop> {
-  const memory = new Memory();
+  const memory = new Memory(options.memory);
   await memory.init();
   return new AgentLoop(
     {

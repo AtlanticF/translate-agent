@@ -1,5 +1,6 @@
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import type { CopilotResponseEntry } from "../../src/messages/context";
+import type { MemoryItem } from "../../src/memory/memory";
 import type { ContextMessage } from "./session";
 
 export const sessions = sqliteTable("sessions", {
@@ -11,6 +12,12 @@ export const sessions = sqliteTable("sessions", {
     .$type<CopilotResponseEntry[]>()
     .notNull(),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+export const userMemories = sqliteTable("user_memories", {
+  userId: text("user_id").primaryKey(),
+  items: text("items", { mode: "json" }).$type<MemoryItem[]>().notNull().default([]),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
 });
 

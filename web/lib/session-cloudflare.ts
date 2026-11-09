@@ -1,6 +1,7 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { drizzle } from "drizzle-orm/d1";
 import { createSessionFileStore, type ObjectBucket, type SessionFileStore } from "./session-files";
+import { createUserMemoryStore, type UserMemoryStore } from "./memory-store";
 import { createSessionStore } from "./session-store";
 import * as schema from "./session-schema";
 import { SessionNotFoundError, type SessionStore } from "./session";
@@ -22,6 +23,13 @@ export async function getSessionStore(): Promise<SessionStore> {
 export async function getSessionFileStore(): Promise<SessionFileStore> {
   const { files } = await openStores();
   return files;
+}
+
+export async function getUserMemoryStore(userId: string): Promise<UserMemoryStore> {
+  const { env } = await getCloudflareContext({ async: true });
+  return createUserMemoryStore(drizzle(env.DB, { schema }), userId, async () =>
+    (await import("./agent-session.js")).readLegacyMemory(),
+  );
 }
 
 function kvFiles(namespace: KVNamespace): ObjectBucket {

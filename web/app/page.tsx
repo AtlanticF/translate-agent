@@ -6,6 +6,7 @@ import { ArrowDownToLineIcon, ArrowUpIcon, CheckIcon, FileTextIcon, LanguagesIco
 import { cn } from "cn";
 import { Button } from "@/components/ui/button";
 import { CopilotReview } from "@/components/copilot-review";
+import { MemoryDialog } from "@/components/memory-dialog";
 import { SessionSidebar } from "@/components/session-sidebar";
 import { Welcome } from "@/components/welcome";
 import {
@@ -70,6 +71,7 @@ export default function Home() {
   const [sessionId, setSessionId] = useState<string | undefined>();
   const [deleteTarget, setDeleteTarget] = useState<SessionSummary>();
   const [deleting, setDeleting] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
   const [messages, setMessages] = useState<ModelMessage[]>([]);
   const [requests, setRequests] = useState<ClientTurn["agentResponse"]["copilotRequests"]>([]);
   const [decisions, setDecisions] = useState<Record<string, CopilotReviewResponse>>({});
@@ -319,7 +321,9 @@ export default function Home() {
         onSelect={(id) => void openSession(id)}
         onRename={(id, title) => void renameSession(id, title)}
         onDelete={setDeleteTarget}
+        onOpenMemory={() => setMemoryOpen(true)}
       />
+      <MemoryDialog open={memoryOpen} onClose={() => setMemoryOpen(false)} />
       <main className="workspace relative flex min-w-0 flex-1 flex-col">
       <header className="workspace-header">
         <div className="flex min-w-0 items-center gap-2.5">

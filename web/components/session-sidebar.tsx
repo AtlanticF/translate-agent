@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type FocusEvent, type KeyboardEvent } from
 import { Dialog } from "@base-ui/react/dialog";
 import { cn } from "cn";
 import {
+  BrainIcon,
   LanguagesIcon,
   Loader2Icon,
   MessageSquareIcon,
@@ -147,6 +148,7 @@ export function SessionSidebar({
   onSelect,
   onRename,
   onDelete,
+  onOpenMemory,
 }: {
   sessions: readonly SessionSummary[];
   currentId?: string;
@@ -156,6 +158,7 @@ export function SessionSidebar({
   onSelect: (id: string) => void;
   onRename: (id: string, title: string) => void;
   onDelete: (session: SessionSummary) => void;
+  onOpenMemory: () => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -269,6 +272,15 @@ export function SessionSidebar({
     finishEdit();
     setMobileOpen(false);
     onSelect(id);
+  }
+
+  function openMemory(mobile: boolean) {
+    finishEdit();
+    if (mobile) {
+      skipDrawerFocusRestore.current = true;
+      setMobileOpen(false);
+    }
+    onOpenMemory();
   }
 
   function deleteSession(session: SessionSummary, mobile: boolean) {
@@ -411,9 +423,11 @@ export function SessionSidebar({
             </div>
           )}
         </nav>
-        <footer className="flex shrink-0 items-center gap-2.5 border-t border-sidebar-border px-5 py-5 text-[11px] text-muted-foreground">
-          <LanguagesIcon className="size-3.5 shrink-0" aria-hidden="true" />
-          <span>逐段翻译 · 由你定稿</span>
+        <footer className="flex shrink-0 items-center border-t border-sidebar-border px-3 py-3">
+          <Button type="button" variant="ghost" size="lg" className="h-11 w-full justify-start gap-2.5 rounded-xl px-2.5 text-[13px] text-muted-foreground md:h-10" onClick={() => openMemory(mobile)}>
+            <BrainIcon aria-hidden="true" />
+            记忆管理
+          </Button>
         </footer>
       </>
     );
@@ -457,9 +471,10 @@ export function SessionSidebar({
                 </Button>
               ))}
             </nav>
-            <footer title="逐段翻译 · 由你定稿" className="flex justify-center border-t border-sidebar-border py-5 text-muted-foreground">
-              <LanguagesIcon className="size-4" aria-hidden="true" />
-              <span className="sr-only">逐段翻译 · 由你定稿</span>
+            <footer className="flex justify-center border-t border-sidebar-border py-3">
+              <Button type="button" variant="ghost" size="icon-lg" className="text-muted-foreground" aria-label="记忆管理" title="记忆管理" onClick={() => openMemory(false)}>
+                <BrainIcon aria-hidden="true" />
+              </Button>
             </footer>
           </>
         ) : !mobileOpen ? expandedContent(false) : null}
